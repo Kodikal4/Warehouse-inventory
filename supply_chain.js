@@ -11,16 +11,16 @@ app.use(express.json());
 // 🔐 Azure SQL Database Connection Configuration
 const dbConfig = {
     // 🖥️ Aligns with DB_SERVER in your portal
-    server: process.env.DB_SERVER || process.env.WAREHOUSE_SQL_SERVER, 
+    server: 'WAREHOUSE_SQL_SERVER.database.windows.net', 
     
     // 📂 Aligns with WAREHOUSE_SQL_DATABASE in your portal
-    database: process.env.WAREHOUSE_SQL_DATABASE,
+    database: 'WAREHOUSE_SQL_DATABASE',
     
     // 👤 Aligns with DB_USER in your portal (Falls back to 'postgres' if missing)
-    user: process.env.DB_USER || process.env.AZURE_SQL_USER || 'postgres',
+    user: 'postgres',
     
     // 🔐 Aligns with your saved portal password keys
-    password: process.env.DB_PASSWORD || process.env.AZURE_SQL_PASSWORD,
+    password: 'postgre4231',
 
     port: 1433,
     options: {
