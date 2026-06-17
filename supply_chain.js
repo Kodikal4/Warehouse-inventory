@@ -1,3 +1,31 @@
+const express = require('express');
+const sql = require('mssql');
+const cors = require('cors');
+const app = express();
+require('dotenv').config();
+
+// 🌐 Production CORS: Open up for development or lock to your exact azure domain
+app.use(cors({ origin: '*' })); 
+app.use(express.json());
+
+// 🔐 Azure SQL Database Connection Configuration
+const dbConfig = {
+    server: process.env.AZURE_SQL_SERVER,      
+    database: process.env.AZURE_SQL_DATABASE,  
+    user: process.env.AZURE_SQL_USER,
+    password: process.env.AZURE_SQL_PASSWORD,
+    port: 1433,
+    options: {
+        encrypt: true, // Required for Azure SQL Server connections
+        trustServerCertificate: false
+    },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
 // 🆕 ENDPOINT: Register a New Part & Initialize Starting Balances
 app.post('/api/inventory/create-part', async (req, res) => {
     try {
@@ -17,7 +45,6 @@ app.post('/api/inventory/create-part', async (req, res) => {
         }
 
         let pool = await sql.connect(dbConfig);
-        
         let transaction = new sql.Transaction(pool);
         await transaction.begin();
 
@@ -75,31 +102,20 @@ app.post('/api/inventory/create-part', async (req, res) => {
 });
 
 // 📦 ENDPOINT: Fast-Scan Stock Reduction (Picking)
-app.post('/api/inventory/scan-decrement', async (req, res) => {
+// Note: Handled via PartID/WarehouseID query matching to support your front-end button structure
+app.post('/api/inventory/pick', async (req, res) => {
     try {
-        const { barcode, warehouseId } = req.body;
+        const { partId, warehouseId } = req.body;
 
-        if (!barcode || !warehouseId) {
-            return res.status(400).json({ error: "Missing barcode or warehouseId parameters." });
+        if (!partId || !warehouseId) {
+            return res.status(400).json({ error: "Missing partId or warehouseId parameters." });
         }
 
         let pool = await sql.connect(dbConfig);
-        
         let transaction = new sql.Transaction(pool);
         await transaction.begin();
 
         try {
-            // 1. Find the Part ID linked to that barcode string (Fixed to explicitly use transaction request context)
-            let partRequest = new sql.Request(transaction);
-            partRequest.input('barcode', sql.VarChar, barcode);
-            let partResult = await partRequest.query("SELECT PartID FROM Parts WHERE BarcodeValue = @barcode");
-            
-            if (partResult.recordset.length === 0) {
-                throw new Error("Barcode not registered in master database.");
-            }
-            const partId = partResult.recordset[0].PartID;
-
-            // 2. Deduct exactly 1 unit from the warehouse balance
             let updateRequest = new sql.Request(transaction);
             updateRequest.input('partId', sql.Int, partId);
             updateRequest.input('warehouseId', sql.Int, warehouseId);
@@ -109,17 +125,16 @@ app.post('/api/inventory/scan-decrement', async (req, res) => {
                 WHERE PartID = @partId AND WarehouseID = @warehouseId
             `);
 
-            // 3. Log the transaction to the audit history table
             let logRequest = new sql.Request(transaction);
             logRequest.input('partId', sql.Int, partId);
             logRequest.input('warehouseId', sql.Int, warehouseId);
             await logRequest.query(`
                 INSERT INTO StockTransactions (PartID, WarehouseID, QuantityChanged, TransactionType, Timestamp)
-                VALUES (@partId, @warehouseId, -1, 'SCAN_OUT', GETDATE())
+                VALUES (@partId, @warehouseId, -1, 'PICK_SHORT', GETDATE())
             `);
 
             await transaction.commit();
-            res.json({ success: true, message: "Item successfully scanned out of inventory." });
+            res.json({ success: true, message: "Item successfully decremented from inventory matrix." });
 
         } catch (innerErr) {
             await transaction.rollback();
@@ -127,36 +142,33 @@ app.post('/api/inventory/scan-decrement', async (req, res) => {
         }
 
     } catch (err) {
-        console.error("Scan processing failure:", err.message);
+        console.error("Pick processing failure:", err.message);
         res.status(400).json({ error: err.message });
     }
 });
 
-// Frontend JavaScript: Fetch and render live Azure inventory data
-async function loadDashboard() {
-    const response = await fetch('http://localhost:5000/api/inventory/low-stock'); // Your endpoint!
-    const items = await response.json();
-    
-    const tableBody = document.getElementById('inventory-rows');
-    tableBody.innerHTML = ''; // Clear old rows
-    
-    items.forEach(item => {
-        tableBody.innerHTML += `
-            <tr>
-                <td><strong>${item.SKU}</strong></td>
-                <td>${item.Name}</td>
-                <td>${item.QuantityOnHand} units</td>
-                <td>
-                    <button class="btn-pick" onclick="adjustStock(${item.PartID}, ${item.WarehouseID})">
-                        ⚡ Pick 1 Unit
-                    </button>
-                </td>
-            </tr>
-        `;
-    });
+// 📉 ENDPOINT: Fetch Low Stock Alerts
+app.get('/api/inventory/low-stock', async (req, res) => {
+    try {
+        // ✅ Added critical 'await' keyword here to prevent runtime engine crash
+        let pool = await sql.connect(dbConfig);
+        let result = await pool.request().query(`
+            SELECT p.PartID, p.SKU, p.Name, b.QuantityOnHand, b.WarehouseID
+            FROM Parts p
+            JOIN InventoryBalances b ON p.PartID = b.PartID
+            WHERE b.QuantityOnHand <= p.MinimumStockLevel
+        `);
+        
+        res.json(result.recordset);
+    } catch (err) {
+        console.error("Failed to fetch low stock alerts:", err.message);
+        res.status(500).json({ error: "Internal database query failure." });
+    }
+});
 
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`Inventory Engine active on port ${PORT}`));
+// Serve frontend dashboard safely out of the root route if visiting the app domain directly
+app.use(express.static('.'));
 
-    app.use(cors({ origin: 'https://your-frontend-domain.com' }));
-}
+// 🚀 Express initialization
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Inventory Engine active on port ${PORT}`));
