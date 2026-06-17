@@ -4,6 +4,7 @@
   "description": "",
   "main": "supply_chain.js",
   "scripts": {
+    "start": "node supply_chain.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
