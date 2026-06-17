@@ -11,7 +11,7 @@ app.use(express.json());
 // 🔐 Azure SQL Database Connection Configuration
 const dbConfig = {
     // 🖥️ Aligns with DB_SERVER in your portal
-    server: 'WAREHOUSE_SQL_SERVER.database.windows.net', 
+    server: 'superman4-server.database.windows.net', 
     
     // 📂 Aligns with WAREHOUSE_SQL_DATABASE in your portal
     database: 'superman4',
@@ -166,6 +166,8 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
             JOIN InventoryBalances b ON p.PartID = b.PartID
             WHERE b.QuantityOnHand <= p.MinimumStockLevel
         `);
+
+        console.log(`Successfully fetched ${result.recordset.length} low-stock inventory items.`);
         
         res.json(result.recordset);
     } catch (err) {
