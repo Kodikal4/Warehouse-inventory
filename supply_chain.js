@@ -10,10 +10,18 @@ app.use(express.json());
 
 // 🔐 Azure SQL Database Connection Configuration
 const dbConfig = {
-    server: process.env.AZURE_SQL_SERVER,      
-    database: process.env.AZURE_SQL_DATABASE,  
-    user: process.env.AZURE_SQL_USER,
-    password: process.env.AZURE_SQL_PASSWORD,
+    // 🖥️ Aligns with DB_SERVER in your portal
+    server: process.env.DB_SERVER || process.env.WAREHOUSE_SQL_SERVER, 
+    
+    // 📂 Aligns with WAREHOUSE_SQL_DATABASE in your portal
+    database: process.env.WAREHOUSE_SQL_DATABASE,
+    
+    // 👤 Aligns with DB_USER in your portal (Falls back to 'postgres' if missing)
+    user: process.env.DB_USER || process.env.AZURE_SQL_USER || 'postgres',
+    
+    // 🔐 Aligns with your saved portal password keys
+    password: process.env.DB_PASSWORD || process.env.AZURE_SQL_PASSWORD,
+
     port: 1433,
     options: {
         encrypt: true, // Required for Azure SQL Server connections
@@ -171,7 +179,7 @@ const path = require('path');
 app.use(express.static(path.join(__dirname, '.')));
 
 // Fallback catch-all route to explicitly stream index.html if a user hits the base URL
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
