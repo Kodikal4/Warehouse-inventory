@@ -148,7 +148,7 @@ app.post('/api/inventory/pick', async (req, res) => {
 });
 
 // 📉 ENDPOINT: Fetch Low Stock Alerts
-app.get('/api/inventory/low-stock', async (req, res) => {
+app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         // ✅ Added critical 'await' keyword here to prevent runtime engine crash
         let pool = await sql.connect(dbConfig);
@@ -166,8 +166,14 @@ app.get('/api/inventory/low-stock', async (req, res) => {
     }
 });
 
-// Serve frontend dashboard safely out of the root route if visiting the app domain directly
-app.use(express.static('.'));
+// 📂 Serve Static Frontend Files with Absolute Pathing
+const path = require('path');
+app.use(express.static(path.join(__dirname, '.')));
+
+// Fallback catch-all route to explicitly stream index.html if a user hits the base URL
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // 🚀 Express initialization
 const PORT = process.env.PORT || 5000;
