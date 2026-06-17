@@ -14,7 +14,7 @@ const dbConfig = {
     server: 'WAREHOUSE_SQL_SERVER.database.windows.net', 
     
     // 📂 Aligns with WAREHOUSE_SQL_DATABASE in your portal
-    database: 'WAREHOUSE_SQL_DATABASE',
+    database: 'superman4',
     
     // 👤 Aligns with DB_USER in your portal (Falls back to 'postgres' if missing)
     user: 'postgres',
