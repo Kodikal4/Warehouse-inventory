@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Inventory</title>
+
+    <style>
+        :root {
+            --bg-color: #121214;
+            --card-bg: #1a1a1e;
+            --accent-color: #0078d4;
+            --text-color: #e3e3e6;
+            --danger-color: #d83b01;
+            --border-color: #2d2d34;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+        }
+        .status-badge {
+            background-color: #107c41;
+            color: white;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.85rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+        th {
+            background-color: #25252b;
+            color: #a1a1a6;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+        .btn-pick {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-pick:hover {
+            background-color: #005a9e;
+        }
+
+        .loading, .error-msg {
+            text-align: center;
+            padding: 2rem;
+            font-style: italic;
+            color: #a1a1a6;
+        }
+        .error-msg { color: var(--danger-color); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div>
+          <h1 style="margin: 0;">Warehouse Inventory Dashboard</h1>
+          <p style="margin: 0.5rem 0 0 0; color: #a1a1a6;">Crtical Low-Stock Alerts</p>
+        </div>
+        <div class="status-badge">📡 Azure Engine Live</div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>SKU</th>
+                <th>Name</th>
+                <th>Quantity on Hand</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="inventory-rows">
+            <tr>
+                <td colspan="4" class="loading">Loading inventory data...</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    const API_BASE_URL = 'https://warehouse-info-hcczhffkhygfdefd.centralus-01.azurewebsites.net';
+
+    // Frontend JavaScript: Fetch and render live Azure inventory data
+    async function loadDashboard() {
+        const tableBody = document.getElementById('inventory-rows');
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/inventory/low-stock`);
+            if (!response.ok) throw new Error('Failed to extract active dataset.');
+            
+            const items = await response.json();
+            tableBody.innerHTML = ''; // Clear out loading state
+
+            if (items.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="4" class="loading" style="color: #107c41;">✅ All warehouse floor inventory thresholds are completely healthy.</td></tr>`;
+                return;
+            }
+    
+            items.forEach(item => {
+                // 1. Create a secure, plain text string for your template row
+                tableBody.innerHTML += `
+                    <tr>
+                        <td><strong>${item.SKU}</strong></td>
+                        <td>${item.Name}</td>
+                        <td>${item.QuantityOnHand} units</td>
+                        <td>
+                            <button class="btn-pick" 
+                                    data-part="${item.PartID}" 
+                                    data-warehouse="${item.WarehouseID}" 
+                                    onclick="adjustStock(this.dataset.part, this.dataset.warehouse)">
+                                ⚡ Pick 1 Unit
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+        } catch (error) {
+            console.error(error);
+            tableBody.innerHTML = `<tr><td colspan="4" class="error-msg">❌ Operational Error: Unable to reach inventory backend. Check firewall logs.</td></tr>`;
+        }
+    }
+
+    async function adjustStock(partId, warehouseId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/inventory/pick`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ PartID: partId, WarehouseID: warehouseId })
+                });
+
+                if (response.ok) {
+                    loadDashboard();
+                } else {
+                    alert('Transaction declined: Allocation exceeds safe threshold limits.');
+                }
+            } catch (error) {
+                    alert('Error processing request. Please try again later.');
+            }
+    }
+    
+    // Initial boot up cascade
+    window.addEventListener('DOMContentLoaded', loadDashboard);
+</script>
+
+</body>
+</html>
