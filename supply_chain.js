@@ -1,5 +1,5 @@
 const express = require('express');
-const sql = require('mssql');
+const { Pool } = require('pg');
 const cors = require('cors');
 const app = express();
 require('dotenv').config();
