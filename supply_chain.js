@@ -13,8 +13,13 @@ const db = new Pool({
     ssl: { rejectUnauthorized: false } // Required for secure Azure database links
 });
 
+// A. CRITICAL FIX: Explicitly serve index.html on the root domain path
+app.get('/', (_req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 // 1. GET: Fetch Dashboard Low Stock Items (Using our case-insensitive Views)
-app.get('/api/inventory/low-stock', async (req, res) => {
+app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
             SELECT 
