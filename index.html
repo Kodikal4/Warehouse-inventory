@@ -94,8 +94,8 @@
                     row.innerHTML = `
                         <div style="font-weight: bold;">${item.SKU}</div>
                         <div>${item.Name}</div>
-                        <div style="color: #ca8a04;">${item.MaterialName || 'Standard'}</div>
-                        <div style="color: #4ade80; font-weight: bold;">$${parseFloat(item.RetailPrice).toFixed(2)}</div>
+                        <div style="color: #ca8a04;">${item.MaterialName || item.material_name || 'Standard'}</div>
+                        <div style="color: #4ade80; font-weight: bold;">$${parseFloat(item.RetailPrice || item.retailprice || 0).toFixed(2)}</div>
                         <div style="color: #888; font-size: 13px;">${item.BinLocation}</div>
                         <div>${item.QuantityOnHand} units</div>
                         <div style="font-size: 13px; color: #a3a3a3;">${checkoutDate}</div>
