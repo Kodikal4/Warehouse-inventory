@@ -1,156 +1,110 @@
 const express = require('express');
-const { Pool } = require('pg'); // 🐘 Clean PostgreSQL integration
+const { Pool } = require('pg');
 const cors = require('cors');
-const path = require('path');
-const app = express();
 require('dotenv').config();
 
-app.use(cors({ origin: '*' })); 
-app.use(express.json());
+const app = express();
+app.use(cors());
+app.use(express.json()); // Essential to parse incoming req.body JSON strings!
 
-// 🔐 PostgreSQL Absolute URI Mapping Configuration
-const dbConfig = {
-    // Directly parsing your valid Azure connection string
-    connectionString: process.env.WAREHOUSE_SQL_DATABASE || 'postgresql://superman4:postgre4231@postgres:5432/superman4',
-    ssl: {
-        rejectUnauthorized: false // Required for secure Azure PostgreSQL connections
-    }
-};
-
-// Initialize the PostgreSQL central pool connection
-const pool = new Pool(dbConfig);
-
-// 🆕 ENDPOINT: Register a New Part & Initialize Starting Balances
-app.post('/api/inventory/create-part', async (req, res) => {
-    // Grab a client from the connection pool to run a secure multi-query transaction
-    const client = await pool.connect();
-    try {
-        const { 
-            sku, 
-            partName, 
-            description, 
-            unitCost, 
-            retailPrice, 
-            minimumStockLevel, 
-            initialWarehouseId, 
-            initialQty 
-        } = req.body;
-
-        if (!sku || !partName || unitCost === undefined || retailPrice === undefined) {
-            return res.status(400).json({ error: "Missing required core product metadata parameters." });
-        }
-
-        // Begin Transaction block
-        await client.query('BEGIN');
-
-        // 1. Insert the part metadata profile (PostgreSQL uses RETURNING instead of OUTPUT INSERTED)
-        const partQuery = `
-            INSERT INTO "Parts" ("SKU", "Name", "Description", "UnitCost", "RetailPrice", "MinimumStockLevel")
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING "PartID";
-        `;
-        const partResult = await client.query(partQuery, [
-            sku, 
-            partName, 
-            description || "", 
-            unitCost, 
-            retailPrice, 
-            minimumStockLevel || 10
-        ]);
-        
-        const newPartId = partResult.rows[0].partid;
-
-        // 2. Initialize warehouse allocations if present
-        if (initialWarehouseId && initialQty !== undefined) {
-            const balanceQuery = `
-                INSERT INTO "InventoryBalances" ("PartID", "WarehouseID", "BinLocation", "QuantityOnHand")
-                VALUES ($1, $2, 'RECEIVING-DOCK', $3);
-            `;
-            await client.query(balanceQuery, [newPartId, initialWarehouseId, initialQty]);
-
-            const logQuery = `
-                INSERT INTO "StockTransactions" ("PartID", "WarehouseID", "QuantityChanged", "TransactionType", "Timestamp")
-                VALUES ($1, $2, $3, 'INITIAL_INTAKE', NOW());
-            `;
-            await client.query(logQuery, [newPartId, initialWarehouseId, initialQty]);
-        }
-
-        await client.query('COMMIT');
-        res.json({ success: true, message: "Asset profile and pricing structure initialized.", partId: newPartId });
-
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error("Asset onboarding processing failure:", err.message);
-        res.status(500).json({ error: "Failed to create parts allocation record." });
-    } finally {
-        client.release(); // Return client back to the pool
-    }
+// Configure connection to Azure PostgreSQL flexible server
+const db = new Pool({
+    connectionString: process.env.WAREHOUSE_SQL_DATABASE,
+    ssl: { rejectUnauthorized: false } // Required for secure Azure database links
 });
 
-// 📦 ENDPOINT: Fast-Scan Stock Reduction (Picking)
-app.post('/api/inventory/pick', async (req, res) => {
-    const client = await pool.connect();
+// 1. GET: Fetch Dashboard Low Stock Items (Using our case-insensitive Views)
+app.get('/api/inventory/low-stock', async (req, res) => {
     try {
-        const { partId, warehouseId } = req.body;
-
-        if (!partId || !warehouseId) {
-            return res.status(400).json({ error: "Missing partId or warehouseId parameters." });
-        }
-
-        await client.query('BEGIN');
-
-        // Decrement target item inventory allocation matrix
-        const updateQuery = `
-            UPDATE "InventoryBalances" 
-            SET "QuantityOnHand" = "QuantityOnHand" - 1 
-            WHERE "PartID" = $1 AND "WarehouseID" = $2
-        `;
-        await client.query(updateQuery, [partId, warehouseId]);
-
-        // Audit transaction log tracing
-        const logQuery = `
-            INSERT INTO "StockTransactions" ("PartID", "WarehouseID", "QuantityChanged", "TransactionType", "Timestamp")
-            VALUES ($1, $2, -1, 'PICK_SHORT', NOW())
-        `;
-        await client.query(logQuery, [partId, warehouseId]);
-
-        await client.query('COMMIT');
-        res.json({ success: true, message: "Item successfully decremented from inventory matrix." });
-
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error("Pick processing failure:", err.message);
-        res.status(400).json({ error: err.message });
-    } finally {
-        client.release();
-    }
-});
-
-// 📉 ENDPOINT: Fetch Low Stock Alerts
-app.get('/api/inventory/low-stock', async (_req, res) => {
-    try {
-        // Query syntax executing against pg core pooling engine directly
-        const result = await pool.query(`
-            SELECT p."PartID", p."SKU", p."Name", b."QuantityOnHand", b."WarehouseID"
+        const queryText = `
+            SELECT 
+                p."PartID", p."SKU", p."Name", 
+                i."WarehouseID", i."BinLocation", i."QuantityOnHand"
             FROM "Parts" p
-            JOIN "InventoryBalances" b ON p."PartID" = b."PartID"
-            WHERE b."QuantityOnHand" <= p."MinimumStockLevel"
-        `);
-
-        console.log(`Successfully fetched ${result.rows.length} low-stock inventory items.`);
-        res.json(result.rows); // pg hands array arrays back on .rows matrix
+            JOIN "InventoryBalances" i ON p."PartID" = i."PartID"
+            WHERE i."QuantityOnHand" <= p."MinimumStockLevel";
+        `;
+        const result = await db.query(queryText);
+        res.json(result.rows);
     } catch (err) {
-        console.error("Failed to fetch low stock alerts:", err.message);
-        res.status(500).json({ error: "Internal database query failure." });
+        console.error("Backend failed to read tracking views:", err);
+        res.status(500).json({ error: "Failed to extract inventory tracking items" });
     }
 });
 
-// 📂 Serve Static Frontend Files
-app.use(express.static(path.join(__dirname, '.')));
-app.get('/', (_req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+// 2. POST: Adjust Stock Level (Fires when the user clicks 'Pick 1 Unit')
+app.post('/api/inventory/adjust', async (req, res) => {
+    const { partId, warehouseId, quantityChanged, transactiontype } = req.body;
+
+    try {
+        await db.query('BEGIN'); // Start transaction block
+
+        // Deduct/Add items from the physical database table
+        const updateQuery = `
+            UPDATE inventorybalances 
+            SET quantityonhand = quantityonhand + $1 
+            WHERE partid = $2 AND warehouseid = $3
+            RETURNING quantityonhand;
+        `;
+        const updateResult = await db.query(updateQuery, [quantityChanged, partId, warehouseId]);
+
+        if (updateResult.rows.length === 0) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: "Inventory record location target not found" });
+        }
+
+        // Write to history log for warehouse audit tracking
+        const logQuery = `
+            INSERT INTO stocktransactions (partid, warehouseid, quantitychanged, transactiontype)
+            VALUES ($1, $2, $3, $4);
+        `;
+        await db.query(logQuery, [partId, warehouseId, quantityChanged, transactiontype]);
+
+        await db.query('COMMIT'); // Finalize changes cleanly
+        res.json({ success: true, currentStock: updateResult.rows[0].quantityonhand });
+
+    } catch (err) {
+        await db.query('ROLLBACK');
+        console.error("Failed to alter physical inventory volumes:", err);
+        res.status(500).json({ error: "Internal engine error processing transaction modification." });
+    }
 });
 
-// 🚀 Express server deployment initiation
+// 3. PUT: Structural Key Mutation (Safely alters PartID and WarehouseID simultaneously)
+app.put('/api/inventory/update-keys', async (req, res) => {
+    const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
+
+    try {
+        await db.query('BEGIN');
+
+        // Step A: Modify the central definition catalog identifier
+        const alterCatalogQuery = `
+            UPDATE parts 
+            SET partid = $1 
+            WHERE partid = $2;
+        `;
+        await db.query(alterCatalogQuery, [newPartId, oldPartId]);
+
+        // Step B: Update the dependent regional location tracker balances
+        const alterBalanceLocationQuery = `
+            UPDATE inventorybalances 
+            SET partid = $1, warehouseid = $2 
+            WHERE partid = $1 AND warehouseid = $3;
+        `;
+        await db.query(alterBalanceLocationQuery, [newPartId, newWarehouseId, oldWarehouseId]);
+
+        await db.query('COMMIT');
+        res.json({ success: true });
+
+    } catch (err) {
+        await db.query('ROLLBACK');
+        console.error("Primary constraint cascade rejection:", err);
+        res.status(500).json({ error: "Database rejected identifier adjustments due to key collision." });
+    }
+});
+
+// Spin engine up on Azure container target port
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Inventory Engine active on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`Inventory Engine active on port ${PORT}`);
+});
