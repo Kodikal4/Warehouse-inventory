@@ -18,11 +18,11 @@ app.get('/api/inventory/low-stock', async (req, res) => {
     try {
         const queryText = `
             SELECT 
-                p."PartID", p."SKU", p."Name", 
-                i."WarehouseID", i."BinLocation", i."QuantityOnHand"
+                p."PartID", p."SKU", p."Name", p."MaterialName", p."RetailPrice",
+                i."WarehouseID", i."BinLocation", i."QuantityOnHand",
+                (SELECT max(timestamp) FROM stocktransactions WHERE partid = p."PartID" AND transactiontype = 'PICK') AS "DateCheckedOut"
             FROM "Parts" p
-            JOIN "InventoryBalances" i ON p."PartID" = i."PartID"
-            WHERE i."QuantityOnHand" <= p."MinimumStockLevel";
+            JOIN "InventoryBalances" i ON p."PartID" = i."PartID";
         `;
         const result = await db.query(queryText);
         res.json(result.rows);

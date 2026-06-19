@@ -10,7 +10,8 @@
         /* Fixed Header and Data Alignment Grid */
         .inventory-grid-header, .inventory-grid-row {
             display: grid;
-            grid-template-columns: 1.5fr 2.5fr 1.5fr 1.5fr 1.5fr 1.5fr;
+            /* Expanded grid template to perfectly space out 8 columns */
+            grid-template-columns: 1.2fr 2fr 1.2fr 1fr 1fr 1fr 1.5fr 1.2fr;
             align-items: center;
             padding: 12px;
             border-bottom: 1px solid #292929;
@@ -40,9 +41,11 @@
         <div class="inventory-grid-header">
             <div>SKU</div>
             <div>NAME</div>
+            <div>MATERIAL</div>
+            <div>PRICE</div>
             <div>LOCATION</div>
             <div>ON HAND</div>
-            <div>STATUS</div>
+            <div>LAST CHECKOUT</div>
             <div>ACTION</div>
         </div>
 
@@ -82,16 +85,22 @@
                 container.innerHTML = ''; 
 
                 dataset.forEach(item => {
+                    const checkoutDate = item.DateCheckedOut 
+                        ? new Date(item.DateCheckedOut).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) 
+                        : '—';
+
                     const row = document.createElement('div');
                     row.className = 'inventory-grid-row';
                     row.innerHTML = `
-                        <div style="font-weight: bold;">${item.SKU || item.sku}</div>
-                        <div>${item.Name || item.name}</div>
-                        <div style="color: #888; font-size: 13px;">${item.BinLocation || 'RECEIVING'} (WH-${item.WarehouseID || '101'})</div>
-                        <div>${item.QuantityOnHand || item.quantityonhand} units</div>
-                        <div><span class="badge badge-danger">🚨 LOW STOCK</span></div>
+                        <div style="font-weight: bold;">${item.SKU}</div>
+                        <div>${item.Name}</div>
+                        <div style="color: #ca8a04;">${item.MaterialName || 'Standard'}</div>
+                        <div style="color: #4ade80; font-weight: bold;">$${parseFloat(item.RetailPrice).toFixed(2)}</div>
+                        <div style="color: #888; font-size: 13px;">${item.BinLocation}</div>
+                        <div>${item.QuantityOnHand} units</div>
+                        <div style="font-size: 13px; color: #a3a3a3;">${checkoutDate}</div>
                         <div>
-                            <button class="btn-pick" onclick="executeStockPick(${item.PartID || item.partid}, ${item.WarehouseID || item.warehouseid})">
+                            <button class="btn-pick" onclick="executeStockPick(${item.PartID}, ${item.WarehouseID})">
                                 ⚡ Pick 1 Unit
                             </button>
                         </div>
