@@ -78,42 +78,86 @@
         // Fetch and display database elements seamlessly
         async function loadDashboard() {
             try {
-                const response = await fetch('/api/inventory/low-stock');
-                const dataset = await response.json();
-                
-                const container = document.getElementById('inventory-data-target');
-                container.innerHTML = ''; 
 
-                dataset.forEach(item => {
-                    const checkoutDate = item.DateCheckedOut 
+                const dataset = [
+            {
+                "PartID": 1,
+                "SKU": "SKU-AZURE-PRO",
+                "Name": "Cloud Processing Core Unit",
+                "MaterialName": "Aerospace-Grade Aluminum",
+                "RetailPrice": "149.99",
+                "WarehouseID": 101,
+                "BinLocation": "ZONE-A-BIN-7",
+                "QuantityOnHand": 2
+            },
+            {
+                "PartID": 2,
+                "SKU": "SKU-AZURE-NODE",
+                "Name": "Edge Routing Controller",
+                "MaterialName": "High-Density Polyethylene",
+                "RetailPrice": "89.50",
+                "WarehouseID": 101,
+                "BinLocation": "ZONE-B-BIN-3",
+                "QuantityOnHand": 4
+            },
+            {
+                "PartID": 3,
+                "SKU": "SKU-AZURE-THERM",
+                "Name": "Thermal Regulation Sink",
+                "MaterialName": "Anodized Copper",
+                "RetailPrice": "210.00",
+                "WarehouseID": 101,
+                "BinLocation": "ZONE-C-BIN-12",
+                "QuantityOnHand": 1
+            },
+            {
+                "PartID": 4,
+                "SKU": "SKU-AZURE-PWR",
+                "Name": "Solid State Power Module",
+                "MaterialName": "Silicon Carbide",
+                "RetailPrice": "345.25",
+                "WarehouseID": 101,
+                "BinLocation": "ZONE-A-BIN-1",
+                "QuantityOnHand": 8
+            }
+        ];
+        
+        const response = await fetch('/api/inventory/low-stock');
+        dataset = await response.json();
+                
+        const container = document.getElementById('inventory-data-target');
+        container.innerHTML = ''; 
+
+        dataset.forEach(item => {
+        const checkoutDate = item.DateCheckedOut 
                         ? new Date(item.DateCheckedOut).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) 
                         : '—';
 
-                    const row = document.createElement('div');
-                    row.className = 'inventory-grid-row';
-                    row.innerHTML = `
-                        <div style="font-weight: bold;">${item.SKU}</div>
-                        <div>${item.Name}</div>
-                        <div style="color: #ca8a04;">${item.MaterialName || item.material_name || 'Standard'}</div>
-                        <div style="color: #4ade80; font-weight: bold;">$${parseFloat(item.RetailPrice || item.retailprice || 0).toFixed(2)}</div>
-                        <div style="color: #888; font-size: 13px;">${item.BinLocation}</div>
-                        <div>${item.QuantityOnHand} units</div>
-                        <div style="font-size: 13px; color: #a3a3a3;">${checkoutDate}</div>
-                        <div>
-                            <button class="btn-pick" onclick="executeStockPick(${item.PartID}, ${item.WarehouseID})">
+        const row = document.createElement('div');
+        row.className = 'inventory-grid-row';
+        row.innerHTML = `
+            <div style="font-weight: bold;">${item.SKU}</div>
+            <div>${item.Name}</div>
+                <div style="color: #ca8a04;">${item.MaterialName || item.material_name || 'Standard'}</div>
+                <div style="color: #4ade80; font-weight: bold;">$${parseFloat(item.RetailPrice || item.retailprice || 0).toFixed(2)}</div>
+                <div style="color: #888; font-size: 13px;">${item.BinLocation}</div>
+                <div>${item.QuantityOnHand} units</div>
+                <div style="font-size: 13px; color: #a3a3a3;">${checkoutDate}</div>
+                <div>
+                 <button class="btn-pick" onclick="executeStockPick(${item.PartID}, ${item.WarehouseID})">
                                 ⚡ Pick 1 Unit
-                            </button>
-                        </div>
-                    `;
-                    container.appendChild(row);
-                });
-            } catch (err) {
-                console.error("Failed to extract active dataset:", err);
-            }
-        }
+                 </button>
+            </div>
+        `;
+        container.appendChild(row);
+    });
+    } catch (err) {
+        console.error("Failed to extract active dataset:", err);
+    }
+    }
 
-        // Fixed Action Route to clear out the 400 Bad Request error
-        async function executeStockPick(partId, warehouseId) {
+    // Fixed Action Route to clear out the 400 Bad Request error
+    async function executeStockPick(partId, warehouseId) {
             try {
                 const response = await fetch('/api/inventory/adjust', {
                     method: 'POST',
@@ -134,7 +178,7 @@
             } catch (error) {
                 console.error("Network interface error:", error);
             }
-        }
+  }
 
         // Push key changes downstream to your transaction endpoint
         async function updateSystemIdentifiers() {
