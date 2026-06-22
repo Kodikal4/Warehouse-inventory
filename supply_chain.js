@@ -19,16 +19,18 @@ app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 1. GET: Fetch Dashboard Low Stock Items (Using our case-insensitive Views)
+// 1. GET: Fetch Dashboard Low Stock Items (Bypassing view mismatches with a clean, resilient LEFT JOIN)
 app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
             SELECT 
                 p."PartID", p."SKU", p."Name", p."MaterialName", p."RetailPrice",
-                i."WarehouseID", i."BinLocation", i."QuantityOnHand",
+                COALESCE(i."WarehouseID", 101) AS "WarehouseID", 
+                COALESCE(i."BinLocation", 'UNASSIGNED') AS "BinLocation", 
+                COALESCE(i."QuantityOnHand", 0) AS "QuantityOnHand",
                 (SELECT max(timestamp) FROM stocktransactions WHERE partid = p."PartID" AND transactiontype = 'PICK') AS "DateCheckedOut"
             FROM "Parts" p
-            JOIN "InventoryBalances" i ON p."PartID" = i."PartID";
+            LEFT JOIN "InventoryBalances" i ON p."PartID" = i."PartID";
         `;
         const result = await db.query(queryText);
         res.json(result.rows);
@@ -47,7 +49,7 @@ app.post('/api/inventory/adjust', async (req, res) => {
 
         // Deduct/Add items from the physical database table
         const updateQuery = `
-            UPDATE inventorybalances 
+            UPDATE "InventoryBalancesTable" 
             SET quantityonhand = quantityonhand + $1 
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
@@ -85,7 +87,7 @@ app.put('/api/inventory/update-keys', async (req, res) => {
 
         // Step A: Modify the central definition catalog identifier
         const alterCatalogQuery = `
-            UPDATE parts 
+            UPDATE "PartsTable" 
             SET partid = $1 
             WHERE partid = $2;
         `;
@@ -93,7 +95,7 @@ app.put('/api/inventory/update-keys', async (req, res) => {
 
         // Step B: Update the dependent regional location tracker balances
         const alterBalanceLocationQuery = `
-            UPDATE inventorybalances 
+            UPDATE "InventoryBalancesTable" 
             SET partid = $1, warehouseid = $2 
             WHERE partid = $1 AND warehouseid = $3;
         `;
