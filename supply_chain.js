@@ -6,35 +6,33 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.json()); // Essential to parse incoming req.body JSON strings!
+app.use(express.json()); 
 
-// Configure connection to Azure PostgreSQL flexible server
 const db = new Pool({
     connectionString: process.env.WAREHOUSE_SQL_DATABASE,
-    ssl: { rejectUnauthorized: false } // Required for secure Azure database links
+    ssl: { rejectUnauthorized: false } 
 });
 
-// A. CRITICAL FIX: Explicitly serve index.html on the root domain path
 app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 1. GET: Fetch Dashboard Low Stock Items (Bypassing view mismatches with a clean, resilient LEFT JOIN)
+// 1. GET: Fetch Dashboard Items using uppercase Views
 app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
             SELECT 
-                p."partid" AS "PartID", 
-                p."sku" AS "SKU", 
-                p."name" AS "Name", 
-                p."material_name" AS "MaterialName", 
-                p."retailprice" AS "RetailPrice",
-                COALESCE(i."warehouseid", 101) AS "WarehouseID", 
-                COALESCE(i."binlocation", 'UNASSIGNED') AS "BinLocation", 
-                COALESCE(i."quantityonhand", 0) AS "QuantityOnHand",
-                (SELECT max(timestamp) FROM stocktransactions WHERE partid = p."partid" AND transactiontype = 'PICK') AS "DateCheckedOut"
-            FROM "PartsTable" p
-            LEFT JOIN "InventoryBalancesTable" i ON p."partid" = i."partid";
+                p."PartID", 
+                p."SKU", 
+                p."Name", 
+                p."MaterialName", 
+                p."RetailPrice",
+                COALESCE(i."WarehouseID", 101) AS "WarehouseID", 
+                COALESCE(i."BinLocation", 'UNASSIGNED') AS "BinLocation", 
+                COALESCE(i."QuantityOnHand", 0) AS "QuantityOnHand",
+                (SELECT max(timestamp) FROM stocktransactions WHERE partid = p."PartID" AND transactiontype = 'PICK') AS "DateCheckedOut"
+            FROM "Parts" p
+            LEFT JOIN "InventoryBalances" i ON p."PartID" = i."PartID";
         `;
         const result = await db.query(queryText);
         res.json(result.rows);
@@ -44,14 +42,13 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
     }
 });
 
-// 2. POST: Adjust Stock Level (Fires when the user clicks 'Pick 1 Unit')
+// 2. POST: Adjust Stock Level 
 app.post('/api/inventory/adjust', async (req, res) => {
     const { partId, warehouseId, quantityChanged, transactiontype } = req.body;
 
     try {
-        await db.query('BEGIN'); // Start transaction block
+        await db.query('BEGIN'); 
 
-        // Deduct/Add items from the physical database table
         const updateQuery = `
             UPDATE "InventoryBalancesTable" 
             SET quantityonhand = quantityonhand + $1 
@@ -65,14 +62,13 @@ app.post('/api/inventory/adjust', async (req, res) => {
             return res.status(404).json({ error: "Inventory record location target not found" });
         }
 
-        // Write to history log for warehouse audit tracking
         const logQuery = `
             INSERT INTO stocktransactions (partid, warehouseid, quantitychanged, transactiontype)
             VALUES ($1, $2, $3, $4);
         `;
         await db.query(logQuery, [partId, warehouseId, quantityChanged, transactiontype]);
 
-        await db.query('COMMIT'); // Finalize changes cleanly
+        await db.query('COMMIT'); 
         res.json({ success: true, currentStock: updateResult.rows[0].quantityonhand });
 
     } catch (err) {
@@ -82,14 +78,14 @@ app.post('/api/inventory/adjust', async (req, res) => {
     }
 });
 
-// 3. PUT: Structural Key Mutation (Safely alters PartID and WarehouseID simultaneously)
+// 3. PUT: Structural Key Mutation (Fixed to leverage ON UPDATE CASCADE)
 app.put('/api/inventory/update-keys', async (req, res) => {
     const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
 
     try {
         await db.query('BEGIN');
 
-        // Step A: Modify the central definition catalog identifier
+        // Step A: Modify central primary key catalog. This automatically updates InventoryBalancesTable's partid thanks to CASCADE!
         const alterCatalogQuery = `
             UPDATE "PartsTable" 
             SET partid = $1 
@@ -97,13 +93,13 @@ app.put('/api/inventory/update-keys', async (req, res) => {
         `;
         await db.query(alterCatalogQuery, [newPartId, oldPartId]);
 
-        // Step B: Update the dependent regional location tracker balances
+        // Step B: Now, update the warehouse location field cleanly using the newly cascaded Part ID
         const alterBalanceLocationQuery = `
             UPDATE "InventoryBalancesTable" 
-            SET partid = $1, warehouseid = $2 
-            WHERE partid = $1 AND warehouseid = $3;
+            SET warehouseid = $1 
+            WHERE partid = $2 AND warehouseid = $3;
         `;
-        await db.query(alterBalanceLocationQuery, [newPartId, newWarehouseId, oldWarehouseId]);
+        await db.query(alterBalanceLocationQuery, [newWarehouseId, newPartId, oldWarehouseId]);
 
         await db.query('COMMIT');
         res.json({ success: true });
@@ -115,7 +111,6 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     }
 });
 
-// Spin engine up on Azure container target port
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
     console.log(`Inventory Engine active on port ${PORT}`);
