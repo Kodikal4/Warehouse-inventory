@@ -123,8 +123,12 @@
             ];
         
             const response = await fetch('/api/inventory/low-stock');
-            dataset = await response.json();
-                    
+            if (response.ok) {
+                dataset = await response.json();
+            } else {
+                console.warn("Server error received. Falling back to local dataset.");
+            }
+        
             const container = document.getElementById('inventory-data-target');
             container.innerHTML = ''; 
 
@@ -163,10 +167,10 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            partId: partId,
-                            warehouseId: warehouseId,
-                            quantityChanged: -1,
-                            transactiontype: 'PICK'
+                            oldPartId: parseInt(targetPartId),
+                            warehouseId: 101,
+                            newPartId: parseInt(newPartId),
+                            newWarehouseId: parseInt(newWarehouseId)
                         })
                     });
 
@@ -218,6 +222,6 @@
 
         // Initialize dashboard assets immediately on document load
         window.onload = loadDashboard;
-    </script>
+  </script>
 </body>
 </html>
