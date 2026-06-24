@@ -22,17 +22,17 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
             SELECT 
-                p.partid AS "PartID", 
-                p.sku AS "SKU", 
-                p.name AS "Name", 
-                p.material_name AS "MaterialName", 
-                p.retailprice AS "RetailPrice",
-                COALESCE(i.warehouseid, 101) AS "WarehouseID", 
-                COALESCE(i.binlocation, 'UNASSIGNED') AS "BinLocation", 
-                COALESCE(i.quantityonhand, 0) AS "QuantityOnHand",
-                (SELECT max(timestamp) FROM stocktransactions WHERE partid = p.partid AND transactiontype = 'PICK') AS "DateCheckedOut"
-            FROM "PartsTable" p
-            LEFT JOIN "InventoryBalancesTable" i ON p.partid = i.partid;
+                p."PartID", 
+                p."SKU", 
+                p."Name", 
+                p."MaterialName", 
+                p."RetailPrice",
+                COALESCE(i."WarehouseID", 101) AS "WarehouseID", 
+                COALESCE(i."BinLocation", 'UNASSIGNED') AS "BinLocation", 
+                COALESCE(i."QuantityOnHand", 0) AS "QuantityOnHand",
+                (SELECT max(timestamp) FROM stocktransactions WHERE partid = p."PartID" AND transactiontype = 'PICK') AS "DateCheckedOut"
+            FROM "Parts" p
+            LEFT JOIN "InventoryBalances" i ON p."PartID" = i."PartID";
         `;
         const result = await db.query(queryText);
         res.json(result.rows);
