@@ -167,10 +167,10 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            oldPartId: parseInt(targetPartId),
-                            warehouseId: 101,
-                            newPartId: parseInt(newPartId),
-                            newWarehouseId: parseInt(newWarehouseId)
+                            partId: parseInt(partId),
+                            warehouseId: parseInt(warehouseId),
+                            quantityChanged: -1,
+                            transactiontype: 'PICK'
                         })
                     });
 
