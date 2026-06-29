@@ -23,7 +23,7 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
             SELECT 
-                p.partid, 
+              p.partid, 
                 p.sku, 
                 p.name, 
                 p.material_name, 
@@ -32,8 +32,8 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
                 COALESCE(i.binlocation, 'UNASSIGNED') AS binlocation, 
                 COALESCE(i.quantityonhand, 0) AS quantityonhand,
                 (SELECT max(timestamp) FROM stocktransactions t WHERE t.partid = p.partid AND t.transactiontype = 'PICK') AS datecheckedout
-            FROM "PartsTable" p
-            LEFT JOIN "InventoryBalancesTable" i ON p.partid = i.partid;
+            FROM partstable p
+            LEFT JOIN inventorybalancestable i ON p.partid = i.partid;
         `;
         const result = await db.query(queryText);
         res.json(result.rows);
@@ -87,14 +87,14 @@ app.put('/api/inventory/update-keys', async (req, res) => {
         await db.query('BEGIN');
 
         const alterCatalogQuery = `
-            UPDATE "PartsTable" 
+            UPDATE partstable
             SET partid = $1 
             WHERE partid = $2;
         `;
         await db.query(alterCatalogQuery, [newPartId, oldPartId]);
 
         const alterBalanceLocationQuery = `
-            UPDATE "InventoryBalancesTable" 
+            UPDATE inventorybalancestable 
             SET warehouseid = $1 
             WHERE partid = $2 AND warehouseid = $3;
         `;
