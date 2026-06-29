@@ -13,6 +13,10 @@ const db = new Pool({
     ssl: { rejectUnauthorized: false } 
 });
 
+db.on('connect', (client) => {
+    client.query('SET search_path TO public, money_schema, inventory_schema;');
+});
+
 // Serve frontend cleanly from root directory
 app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -50,8 +54,9 @@ app.post('/api/inventory/adjust', async (req, res) => {
     try {
         await db.query('BEGIN'); 
 
+        // Correctly increment/decrement quantityonhand
         const updateQuery = `
-            UPDATE "InventoryBalancesTable" 
+            UPDATE inventorybalancestable 
             SET quantityonhand = quantityonhand + $1 
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
