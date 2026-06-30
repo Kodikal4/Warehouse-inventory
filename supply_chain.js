@@ -27,17 +27,21 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
             SELECT 
-              p.partid, 
+                p.partid, 
                 p.sku, 
                 p.name, 
                 p.material_name, 
-                p.retailprice,
+                CAST(p.retailprice AS FLOAT) as retailprice,
                 COALESCE(i.warehouseid, 101) AS warehouseid, 
                 COALESCE(i.binlocation, 'UNASSIGNED') AS binlocation, 
                 COALESCE(i.quantityonhand, 0) AS quantityonhand,
-                (SELECT max(timestamp) FROM stocktransactions t WHERE t.partid = p.partid AND t.transactiontype = 'PICK') AS datecheckedout
+                COALESCE(
+                    (SELECT max(timestamp) FROM stocktransactions WHERE partid = p.partid AND transactiontype = 'PICK'), 
+                    NULL
+                ) AS datecheckedout
             FROM partstable p
-            LEFT JOIN inventorybalancestable i ON p.partid = i.partid;
+            LEFT JOIN inventorybalancestable i ON p.partid = i.partid
+            ORDER BY p.partid ASC;
         `;
         const result = await db.query(queryText);
         res.json(result.rows);
@@ -54,7 +58,6 @@ app.post('/api/inventory/adjust', async (req, res) => {
     try {
         await db.query('BEGIN'); 
 
-        // Correctly increment/decrement quantityonhand
         const updateQuery = `
             UPDATE inventorybalancestable 
             SET quantityonhand = quantityonhand + $1 
@@ -91,13 +94,20 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     try {
         await db.query('BEGIN');
 
+        // Step 1: Update parent catalog primary key (Cascades to child balance table automatically)
         const alterCatalogQuery = `
             UPDATE partstable
             SET partid = $1 
             WHERE partid = $2;
         `;
-        await db.query(alterCatalogQuery, [newPartId, oldPartId]);
+        const catalogResult = await db.query(alterCatalogQuery, [newPartId, oldPartId]);
 
+        if (catalogResult.rowCount === 0) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: "Target Part ID not found." });
+        }
+
+        // Step 2: Update warehouse context location separately to dodge multi-statement parser errors
         const alterBalanceLocationQuery = `
             UPDATE inventorybalancestable 
             SET warehouseid = $1 
