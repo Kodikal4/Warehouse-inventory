@@ -70,9 +70,13 @@
             try {
                 let dataset = [];
                 const response = await fetch('/api/inventory/low-stock');
+                
                 if (response.ok) {
                     dataset = await response.json();
+                } else {
+                    console.error("Backend returned a status error code:", response.status);
                 }
+                
                 const container = document.getElementById('inventory-data-target');
                 container.innerHTML = ''; 
 
@@ -107,20 +111,29 @@
                 const response = await fetch('/api/inventory/adjust', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ partId, warehouseId, quantityChanged: -1, transactiontype: 'PICK' })
+                    body: JSON.stringify({ 
+                        partId: partId, 
+                        warehouseId: warehouseId, 
+                        quantityChanged: -1, 
+                        transactiontype: 'PICK' 
+                    })
                 });
-                if (response.ok) loadDashboard();
+                if (response.ok) {
+                    loadDashboard();
+                } else {
+                    alert("Stock adjustment rejected by inventory engine.");
+                }
             } catch (error) {
                 console.error("Network interface error:", error);
             }
         }
 
         async function updateSystemIdentifiers() {
-            const targetPartId = document.getElementById('target-part-id').value;
-            const newPartId = document.getElementById('new-part-id').value;
-            const newWarehouseId = document.getElementById('new-warehouse-id').value;
+            const targetPartIdVal = document.getElementById('target-part-id').value;
+            const newPartIdVal = document.getElementById('new-part-id').value;
+            const newWarehouseIdVal = document.getElementById('new-warehouse-id').value;
 
-            if (!newPartId || !newWarehouseId) {
+            if (!newPartIdVal || !newWarehouseIdVal) {
                 alert("Please declare both target identities before updating structural keys.");
                 return;
             }
@@ -130,19 +143,20 @@
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        oldPartId: parseInt(targetPartId),
-                        oldWarehouseId: 101,
-                        newPartId: parseInt(newPartId),
-                        newWarehouseId: parseInt(newWarehouseId)
+                        oldPartId: parseInt(targetPartIdVal),
+                        oldWarehouseId: 101, // Hardcoded baseline matching fresh SQL seed data
+                        newPartId: parseInt(newPartIdVal),
+                        newWarehouseId: parseInt(newWarehouseIdVal)
                     })
                 });
+                
                 const status = await response.json();
                 if (status.success) {
                     alert("Database relational schemas altered successfully!");
-                    document.getElementById('target-part-id').value = newPartId;
+                    document.getElementById('target-part-id').value = newPartIdVal;
                     loadDashboard();
                 } else {
-                    alert("Structural mutation rejected by Postgres layer.");
+                    alert("Structural mutation rejected by Postgres layer: " + (status.error || "Check foreign keys"));
                 }
             } catch (err) {
                 console.error("Network communication breakdown:", err);
