@@ -13,16 +13,31 @@ const db = new Pool({
     ssl: { rejectUnauthorized: false } 
 });
 
-db.on('connect', (client) => {
-    client.query('SET search_path TO public, money_schema, inventory_schema;');
-});
-
 // Serve frontend cleanly from root directory
 app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 1. GET: Fetch Dashboard Items (FIXED - Removed the invalid CAST type statement)
+// NEW: 1. GET Aggregate Inventory Summary for Analytics Pulse
+app.get('/api/inventory/summary', async (_req, res) => {
+    try {
+        const summaryQuery = `
+            SELECT 
+                COALESCE(SUM(i.quantityonhand * p.retailprice), 0) AS total_value,
+                COUNT(DISTINCT i.warehouseid) AS active_warehouses,
+                COUNT(CASE WHEN i.quantityonhand <= p.minimumstocklevel THEN 1 END) AS stockout_risks
+            FROM public.partstable p
+            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid;
+        `;
+        const result = await db.query(summaryQuery);
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error("Failed to compile executive summary metrics:", err);
+        res.status(500).json({ error: "Internal analytics engine error." });
+    }
+});
+
+// 2. GET: Fetch Dashboard Items
 app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
@@ -32,12 +47,13 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
                 p.name, 
                 p.material_name, 
                 p.retailprice,
+                p.minimumstocklevel,
                 COALESCE(i.warehouseid, 101) AS warehouseid, 
                 COALESCE(i.binlocation, 'UNASSIGNED') AS binlocation, 
                 COALESCE(i.quantityonhand, 0) AS quantityonhand,
-                (SELECT max(timestamp) FROM stocktransactions WHERE partid = p.partid AND transactiontype = 'PICK') AS datecheckedout
-            FROM partstable p
-            LEFT JOIN inventorybalancestable i ON p.partid = i.partid
+                (SELECT max(timestamp) FROM public.stocktransactions WHERE partid = p.partid AND transactiontype = 'PICK') AS datecheckedout
+            FROM public.partstable p
+            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
             ORDER BY p.partid ASC;
         `;
         const result = await db.query(queryText);
@@ -48,14 +64,14 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
     }
 });
 
-// 2. POST: Adjust Stock Level 
+// 3. POST: Adjust Stock Level 
 app.post('/api/inventory/adjust', async (req, res) => {
     const { partId, warehouseId, quantityChanged, transactiontype } = req.body;
     try {
         await db.query('BEGIN'); 
 
         const updateQuery = `
-            UPDATE inventorybalancestable 
+            UPDATE public.inventorybalancestable 
             SET quantityonhand = quantityonhand + $1 
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
@@ -68,7 +84,7 @@ app.post('/api/inventory/adjust', async (req, res) => {
         }
 
         const logQuery = `
-            INSERT INTO stocktransactions (partid, warehouseid, quantitychanged, transactiontype)
+            INSERT INTO public.stocktransactions (partid, warehouseid, quantitychanged, transactiontype)
             VALUES ($1, $2, $3, $4);
         `;
         await db.query(logQuery, [partId, warehouseId, quantityChanged, transactiontype]);
@@ -82,15 +98,14 @@ app.post('/api/inventory/adjust', async (req, res) => {
     }
 });
 
-// 3. PUT: Structural Key Mutation (FIXED - Multi-warehouse safe)
+// 4. PUT: Structural Key Mutation
 app.put('/api/inventory/update-keys', async (req, res) => {
     const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
     try {
         await db.query('BEGIN');
 
-        // Step 1: Update the master catalog record primary identifier
         const alterCatalogQuery = `
-            UPDATE partstable
+            UPDATE public.partstable
             SET partid = $1 
             WHERE partid = $2;
         `;
@@ -101,9 +116,8 @@ app.put('/api/inventory/update-keys', async (req, res) => {
             return res.status(404).json({ error: "Target Part ID not found in system table records." });
         }
 
-        // Step 2: TARGET specifically the correct physical row instead of an entire part group
         const alterBalanceLocationQuery = `
-            UPDATE inventorybalancestable 
+            UPDATE public.inventorybalancestable 
             SET warehouseid = $1 
             WHERE partid = $2 AND warehouseid = $3;
         `;
