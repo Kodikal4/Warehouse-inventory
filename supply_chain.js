@@ -82,13 +82,13 @@ app.post('/api/inventory/adjust', async (req, res) => {
     }
 });
 
-// 3. PUT: Structural Key Mutation (FIXED - Flexible location fallback routing)
+// 3. PUT: Structural Key Mutation (FIXED - Multi-warehouse safe)
 app.put('/api/inventory/update-keys', async (req, res) => {
     const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
     try {
         await db.query('BEGIN');
 
-        // Step 1: Safely shift the master catalog parent record key identifier first
+        // Step 1: Update the master catalog record primary identifier
         const alterCatalogQuery = `
             UPDATE partstable
             SET partid = $1 
@@ -101,13 +101,13 @@ app.put('/api/inventory/update-keys', async (req, res) => {
             return res.status(404).json({ error: "Target Part ID not found in system table records." });
         }
 
-        // Step 2: Apply adaptive key updates to the tracking record row safely
+        // Step 2: TARGET specifically the correct physical row instead of an entire part group
         const alterBalanceLocationQuery = `
             UPDATE inventorybalancestable 
             SET warehouseid = $1 
-            WHERE partid = $2;
+            WHERE partid = $2 AND warehouseid = $3;
         `;
-        await db.query(alterBalanceLocationQuery, [newWarehouseId, newPartId]);
+        await db.query(alterBalanceLocationQuery, [newWarehouseId, newPartId, oldWarehouseId]);
 
         await db.query('COMMIT');
         res.json({ success: true });
