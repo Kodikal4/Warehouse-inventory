@@ -22,7 +22,7 @@ app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 1. GET: Fetch Dashboard Items
+// 1. GET: Fetch Dashboard Items (FIXED - Removed the invalid CAST type statement)
 app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
@@ -31,14 +31,11 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
                 p.sku, 
                 p.name, 
                 p.material_name, 
-                CAST(p.retailprice AS FLOAT) as retailprice,
+                p.retailprice,
                 COALESCE(i.warehouseid, 101) AS warehouseid, 
                 COALESCE(i.binlocation, 'UNASSIGNED') AS binlocation, 
                 COALESCE(i.quantityonhand, 0) AS quantityonhand,
-                COALESCE(
-                    (SELECT max(timestamp) FROM stocktransactions WHERE partid = p.partid AND transactiontype = 'PICK'), 
-                    NULL
-                ) AS datecheckedout
+                (SELECT max(timestamp) FROM stocktransactions WHERE partid = p.partid AND transactiontype = 'PICK') AS datecheckedout
             FROM partstable p
             LEFT JOIN inventorybalancestable i ON p.partid = i.partid
             ORDER BY p.partid ASC;
@@ -54,7 +51,6 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
 // 2. POST: Adjust Stock Level 
 app.post('/api/inventory/adjust', async (req, res) => {
     const { partId, warehouseId, quantityChanged, transactiontype } = req.body;
-
     try {
         await db.query('BEGIN'); 
 
@@ -79,7 +75,6 @@ app.post('/api/inventory/adjust', async (req, res) => {
 
         await db.query('COMMIT'); 
         res.json({ success: true, currentStock: updateResult.rows[0].quantityonhand });
-
     } catch (err) {
         await db.query('ROLLBACK');
         console.error("Failed to alter physical inventory volumes:", err);
@@ -87,14 +82,13 @@ app.post('/api/inventory/adjust', async (req, res) => {
     }
 });
 
-// 3. PUT: Structural Key Mutation
+// 3. PUT: Structural Key Mutation (FIXED - Flexible location fallback routing)
 app.put('/api/inventory/update-keys', async (req, res) => {
     const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
-
     try {
         await db.query('BEGIN');
 
-        // Step 1: Update parent catalog primary key (Cascades to child balance table automatically)
+        // Step 1: Safely shift the master catalog parent record key identifier first
         const alterCatalogQuery = `
             UPDATE partstable
             SET partid = $1 
@@ -104,20 +98,19 @@ app.put('/api/inventory/update-keys', async (req, res) => {
 
         if (catalogResult.rowCount === 0) {
             await db.query('ROLLBACK');
-            return res.status(404).json({ error: "Target Part ID not found." });
+            return res.status(404).json({ error: "Target Part ID not found in system table records." });
         }
 
-        // Step 2: Update warehouse context location separately to dodge multi-statement parser errors
+        // Step 2: Apply adaptive key updates to the tracking record row safely
         const alterBalanceLocationQuery = `
             UPDATE inventorybalancestable 
             SET warehouseid = $1 
-            WHERE partid = $2 AND warehouseid = $3;
+            WHERE partid = $2;
         `;
-        await db.query(alterBalanceLocationQuery, [newWarehouseId, newPartId, oldWarehouseId]);
+        await db.query(alterBalanceLocationQuery, [newWarehouseId, newPartId]);
 
         await db.query('COMMIT');
         res.json({ success: true });
-
     } catch (err) {
         await db.query('ROLLBACK');
         console.error("Primary constraint cascade rejection:", err);
