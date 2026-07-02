@@ -42,19 +42,19 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
     try {
         const queryText = `
             SELECT 
-                p.partid, 
                 p.sku, 
-                p.name, 
-                p.material_name, 
-                p.retailprice,
-                p.minimumstocklevel,
-                COALESCE(i.warehouseid, 101) AS warehouseid, 
-                COALESCE(i.binlocation, 'UNASSIGNED') AS binlocation, 
-                COALESCE(i.quantityonhand, 0) AS quantityonhand,
-                (SELECT max(timestamp) FROM public.stocktransactions WHERE partid = p.partid AND transactiontype = 'PICK') AS datecheckedout
-            FROM public.partstable p
-            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
-            ORDER BY p.partid ASC;
+                p.name AS asset_class, 
+                p.material_name AS material, 
+                p.retailprice AS price,
+                -- Translate cryptic Warehouse IDs into clear human locations!
+                CASE 
+                    WHEN i.warehouseid = 101 THEN '📍 Detroit Assembly Plant'
+                    WHEN i.warehouseid = 202 THEN '📍 Chicago Distribution Hub'
+                    ELSE '📍 Unknown Node (' || i.warehouseid || ')'
+                END AS node_loc,
+                i.quantityonhand AS capacity_rate
+        FROM public.partstable p
+        LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid;
         `;
         const result = await db.query(queryText);
         res.json(result.rows);
@@ -104,31 +104,41 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     try {
         await db.query('BEGIN');
 
-        const alterCatalogQuery = `
-            UPDATE public.partstable
-            SET partid = $1 
-            WHERE partid = $2;
-        `;
-        const catalogResult = await db.query(alterCatalogQuery, [newPartId, oldPartId]);
-
-        if (catalogResult.rowCount === 0) {
-            await db.query('ROLLBACK');
-            return res.status(404).json({ error: "Target Part ID not found in system table records." });
+        // 1. Update the item's main catalog number in the partstable
+        // If the ID is the same (e.g. 1 to 1), this cleanly skips modification
+        if (oldPartId !== newPartId) {
+            await client.query(`
+                UPDATE public.partstable 
+                SET partid = $1 
+                WHERE partid = $2;
+            `, [newPartId, oldPartId]);
         }
 
-        const alterBalanceLocationQuery = `
-            UPDATE public.inventorybalancestable 
-            SET warehouseid = $1 
-            WHERE partid = $2 AND warehouseid = $3;
+        // 2. SMART LOGISTICS UPDATE (Prevents Key Collision)
+        // This checks if the new location already tracks this item.
+        // If it does, it updates it. If it doesn't, it creates it cleanly.
+        const upsertInventoryQuery = `
+            INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand)
+            VALUES ($1, $2, 'TRANSFER-ZONE', 1)
+            ON CONFLICT (partid, warehouseid) 
+            DO UPDATE SET 
+                warehouseid = EXCLUDED.warehouseid,
+                binlocation = 'RELOCATED-BAY';
         `;
-        await db.query(alterBalanceLocationQuery, [newWarehouseId, newPartId, oldWarehouseId]);
+        
+        await client.query(upsertInventoryQuery, [newPartId, newWarehouseId]);
 
-        await db.query('COMMIT');
-        res.json({ success: true });
+        // Commit the transaction to the Azure database
+        await client.query('COMMIT');
+        res.status(200).json({ success: true });
+
     } catch (err) {
-        await db.query('ROLLBACK');
-        console.error("Primary constraint cascade rejection:", err);
-        res.status(500).json({ error: "Database rejected identifier adjustments due to key collision." });
+        // If anything goes wrong, safely rollback so data isn't corrupted
+        await client.query('ROLLBACK');
+        console.error("Logistics Update Failed:", err);
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
     }
 });
 
