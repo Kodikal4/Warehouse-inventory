@@ -2,10 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Enterprise Supply Chain Control Center</title>
+    <title>Global Inventory & Warehouse Manager</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 20px; }
         .dashboard-container { max-width: 1100px; margin: 0 auto; }
+        
+        /* Introductory Overview Banner */
+        .hero-banner { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 24px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #334155; }
+        .hero-banner h1 { margin: 0 0 8px 0; font-size: 26px; color: #f1f5f9; }
+        .hero-banner p { margin: 0; color: #94a3b8; font-size: 15px; line-height: 1.5; }
         
         /* Feature 1: Executive Pulse Analytics Grid */
         .pulse-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
@@ -16,12 +21,12 @@
         /* Grid Framework */
         .inventory-grid-header, .inventory-grid-row {
             display: grid;
-            grid-template-columns: 1.2fr 1.8fr 1.2fr 1fr 1fr 1.5fr 1.3fr 1.4fr;
+            grid-template-columns: 1.2fr 1.8fr 1.2fr 1fr 1.8fr 1.2fr 1.3fr 1.4fr;
             align-items: center;
             padding: 14px;
             border-bottom: 1px solid #334155;
         }
-        .inventory-grid-header { background-color: #1e293b; font-weight: bold; color: #94a3b8; border-radius: 6px 6px 0 0; }
+        .inventory-grid-header { background-color: #1e293b; font-weight: bold; color: #94a3b8; border-radius: 6px 6px 0 0; font-size: 13px; letter-spacing: 0.03em; }
         .inventory-grid-row:hover { background-color: #1e293b; }
         
         /* Feature 4: Visual Allocation Indicator */
@@ -36,7 +41,8 @@
         .admin-panel { background-color: #1e293b; padding: 20px; border-radius: 8px; margin-top: 30px; border: 1px solid #334155; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; color: #94a3b8; font-size: 13px; }
-        .form-group input { background: #0f172a; border: 1px solid #334155; color: #fff; padding: 8px; border-radius: 4px; width: 180px; }
+        .form-group label span { color: #38bdf8; cursor: help; font-size: 12px; margin-left: 4px; }
+        .form-group input { background: #0f172a; border: 1px solid #334155; color: #fff; padding: 8px; border-radius: 4px; width: 190px; }
         
         button { background-color: #2563eb; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: 500; }
         button:hover { background-color: #1d4ed8; }
@@ -54,63 +60,71 @@
 </head>
 <body>
     <div class="dashboard-container">
-        <h2>Enterprise Supply Chain Control Center</h2>
-        <p style="color: #94a3b8; margin-bottom: 25px;">Live Global Node Asset Management & Relational Integrity Layer</p>
+        
+        <!-- Human-Readable Welcome Introduction -->
+        <div class="hero-banner">
+            <h1>🏢 Global Inventory & Warehouse Manager</h1>
+            <p>A dashboard that views product stock amount, monitors storage facilities, and transfers items between warehouses instantly.</p>
+        </div>
 
         <div class="pulse-metrics">
             <div class="metric-card">
-                <h4>Total Active Assets (Value)</h4>
+                <h4>Total On-Hand Value</h4>
                 <div class="metric-val" id="meta-value">$0.00</div>
             </div>
             <div class="metric-card">
-                <h4>Active Distribution Nodes</h4>
+                <h4>Active Facilities</h4>
                 <div class="metric-val" id="meta-nodes">0</div>
             </div>
             <div class="metric-card">
-                <h4>Threshold Stockout Risks</h4>
+                <h4>Items Running Low</h4>
                 <div class="metric-val" id="meta-risks" style="color: #f87171;">0</div>
             </div>
         </div>
 
+        <!-- Clarified Grid Header Phrasing -->
         <div class="inventory-grid-header">
-            <div>SKU</div>
-            <div>ASSET CLASS</div>
+            <div>SKU/PART NO.</div>
+            <div>PRODUCT NAME</div>
             <div>MATERIAL</div>
-            <div>PRICE</div>
-            <div>NODE LOC</div>
-            <div>CAPACITY RATE</div>
-            <div>LAST TRANSACTION</div>
-            <div>ACTIONS</div>
+            <div>RETAIL PRICE</div>
+            <div>FACILITY LOCATION</div>
+            <div>STOCK LEVEL</div>
+            <div>LAST UPDATED</div>
+            <div>STOCK ACTIONS</div>
         </div>
 
         <div id="inventory-data-target"></div>
 
+        <!-- Cleaned Up Administrative Transfer Form -->
         <div class="admin-panel">
-            <h3>Structural Key Mutation Console</h3>
-            <p style="font-size: 13px; color: #94a3b8;">Execute primary constraint mutations and route assets dynamically across storage tiers.</p>
+            <h3>📦 Product Transfer & Re-Indexing Tool</h3>
+            <p style="font-size: 13px; color: #94a3b8; margin-bottom: 20px;">
+                Update an item's unique system code number or reassign its primary tracking entry to a different regional distribution hub.
+            </p>
             
             <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                 <div class="form-group">
-                    <label>Target Part ID</label>
+                    <label>Target Part ID <span title="The unique database ID of the item you want to modify (e.g., 1 for Processing Cores).">ⓘ</span></label>
                     <input type="number" id="target-part-id" value="1">
                 </div>
                 <div class="form-group">
-                    <label>New System Part ID</label>
+                    <label>New System Part ID <span title="Assign a brand-new, unused product identifier number (e.g., 5, 6, 7) to avoid system duplicates.">ⓘ</span></label>
                     <input type="number" id="new-part-id" placeholder="e.g. 5">
                 </div>
                 <div class="form-group">
-                    <label>New Warehouse Node ID</label>
+                    <label>New Facility ID <span title="The system ID number of the physical warehouse location where this stock entry will be moved.">ⓘ</span></label>
                     <input type="number" id="new-warehouse-id" placeholder="e.g. 202">
                 </div>
             </div>
-            <button onclick="updateSystemIdentifiers()">⚡ Mutate Relational Architecture</button>
+            <button onclick="updateSystemIdentifiers()">⚙️ Apply Changes & Transfer Product</button>
         </div>
     </div>
 
     <script>
         async function loadDashboard() {
             try {
-                // Fetch Executive summary pulse data (Feature 1)
+                // Fetch Executive summary pulse data
                 const summaryRes = await fetch('/api/inventory/summary');
                 if (summaryRes.ok) {
                     const metrics = await summaryRes.json();
@@ -132,11 +146,10 @@
                         ? new Date(item.datecheckedout).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) 
                         : '—';
 
-                    // Feature 4: Calculate Allocation Bar Percentage relative to arbitrary benchmark max 10
+                    // Allocation Bar Percentage Calculation
                     const percent = Math.min((item.quantityonhand / 10) * 100, 100);
                     const barColor = item.quantityonhand <= item.minimumstocklevel ? '#ef4444' : '#3b82f6';
 
-                    // Feature 2: Conditional Trigger Generation 
                     const isLowStock = item.quantityonhand <= item.minimumstocklevel;
                     const statusBadge = isLowStock 
                         ? `<span class="badge badge-danger">CRITICAL LEVEL</span>`
@@ -145,6 +158,16 @@
                     const reorderAction = isLowStock
                         ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">📦 Restock</button>`
                         : '';
+
+                    // Friendly location logic string interpolation fallback
+                    let customLocationDisplay = `Node ${item.warehouseid}`;
+                    if (item.node_loc) {
+                        customLocationDisplay = item.node_loc;
+                    } else if (item.warehouseid == 101) {
+                        customLocationDisplay = "📍 Detroit Plant (101)";
+                    } else if (item.warehouseid == 202) {
+                        customLocationDisplay = "📍 Chicago Hub (202)";
+                    }
 
                     const row = document.createElement('div');
                     row.className = 'inventory-grid-row';
@@ -156,7 +179,7 @@
                         </div>
                         <div style="color: #eab308; font-size: 14px;">${item.material_name || 'Standard'}</div>
                         <div style="color: #10b981; font-weight: bold;">$${parseFloat(item.retailprice || 0).toFixed(2)}</div>
-                        <div style="color: #94a3b8; font-size: 13px;">Node ${item.warehouseid}<br><span style="color:#64748b">${item.binlocation}</span></div>
+                        <div style="color: #94a3b8; font-size: 13px;">${customLocationDisplay}<br><span style="color:#64748b">${item.binlocation || ''}</span></div>
                         <div>
                             <div style="font-size: 13px;">${item.quantityonhand} units</div>
                             <div class="load-bar-container">
@@ -189,9 +212,8 @@
             }
         }
 
-        // Feature 2: Automated Workflow Simulation Hook
         function dispatchRestockOrder(sku, partId, warehouseId) {
-            alert(`[AUTOMATED SUPPLY CHAIN DISPATCH]\n\nPurchase Order generated successfully for ${sku}.\nRouting 5 tracking units to Warehouse Node ${warehouseId}.`);
+            alert(`[AUTOMATED SUPPLY CHAIN DISPATCH]\n\nPurchase Order generated successfully for ${sku}.\nRouting 5 stock units to Warehouse Location ${warehouseId}.`);
             fetch('/api/inventory/adjust', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -205,7 +227,7 @@
             const newWarehouseIdVal = document.getElementById('new-warehouse-id').value;
 
             if (!newPartIdVal || !newWarehouseIdVal) {
-                alert("Please declare both target identities before updating structural keys.");
+                alert("Please fill out both the New System Part ID and New Facility ID fields before updating records.");
                 return;
             }
 
@@ -223,11 +245,20 @@
                 
                 const status = await response.json();
                 if (status.success) {
-                    alert("Database relational schemas altered successfully!");
+                    alert("🎉 Success! The product record has been transferred and system keys re-indexed cleanly.");
                     document.getElementById('target-part-id').value = newPartIdVal;
                     loadDashboard();
                 } else {
-                    alert("Mutation rejected: " + (status.error || "Check foreign keys"));
+                    // Refined, human-friendly translation for the key collision error popup
+                    if (status.error && status.error.includes("key collision")) {
+                        alert(
+                            "📌 Product Transfer Deferred:\n\n" +
+                            "The 'New System Part ID' you typed is already allocated to another active product.\n\n" +
+                            "To complete this transfer safely without over-writing existing database data, please choose a fresh unique identifier number (like 5, 6, or 7)!"
+                        );
+                    } else {
+                        alert("Could not complete transfer: " + (status.error || "System constraint check failed."));
+                    }
                 }
             } catch (err) {
                 console.error("Network communication breakdown:", err);
