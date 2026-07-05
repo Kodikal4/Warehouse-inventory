@@ -2,7 +2,9 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
+
 require('dotenv').config();
+
 
 const app = express();
 app.use(cors());
@@ -10,12 +12,8 @@ app.use(express.json());
 
 // FIXED: Consolidated into a single pool using your exact Azure variable mappings
 const db = new Pool({
-    user: process.env.AZURE_SQL_USER,
-    host: process.env.WAREHOUSE_SQL_SERVER,
-    database: process.env.WAREHOUSE_SQL_DATABASE,
-    password: process.env.AZURE_SQL_PASSWORD,
-    port: 5432,
-    ssl: { rejectUnauthorized: false } 
+    connectionString: "postgresql://superman4:Postgre4231@superman4-db.postgres.database.azure.com:5432/postgres",
+    ssl: { rejectUnauthorized: false }
 });
 
 db.on('connect', (client) => {
