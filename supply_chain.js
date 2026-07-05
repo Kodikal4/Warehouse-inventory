@@ -50,17 +50,19 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
         const queryText = `
             SELECT 
                 p.sku, 
-                p.name AS asset_class, 
-                p.material_name AS material, 
-                p.retailprice AS price,
+                p.name, 
+                p.material_name, 
+                p.retailprice,
+                i.warehouseid,
+                i.quantityonhand,
+                p.minimumstocklevel,
                 CASE 
                     WHEN i.warehouseid = 101 THEN '📍 Detroit Assembly Plant'
                     WHEN i.warehouseid = 202 THEN '📍 Chicago Distribution Hub'
                     ELSE '📍 Unknown Node (' || i.warehouseid || ')'
-                END AS node_loc,
-                i.quantityonhand AS capacity_rate
-        FROM public.partstable p
-        LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid;
+                END AS node_loc
+            FROM public.partstable p
+            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid;
         `;
         const result = await db.query(queryText);
         res.json(result.rows);
