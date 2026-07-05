@@ -18,6 +18,10 @@ const db = new Pool({
     ssl: { rejectUnauthorized: false } 
 });
 
+db.on('connect', (client) => {
+    client.query('SET search_path TO public, assets, values;');
+});
+
 // Serve frontend cleanly from root directory
 app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
