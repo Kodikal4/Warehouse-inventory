@@ -8,8 +8,13 @@ const app = express();
 app.use(cors());
 app.use(express.json()); 
 
+// FIXED: Consolidated into a single pool using your exact Azure variable mappings
 const db = new Pool({
-    connectionString: process.env.WAREHOUSE_SQL_DATABASE,
+    user: process.env.AZURE_SQL_USER,
+    host: process.env.WAREHOUSE_SQL_SERVER,
+    database: process.env.WAREHOUSE_SQL_DATABASE,
+    password: process.env.AZURE_SQL_PASSWORD,
+    port: 5432,
     ssl: { rejectUnauthorized: false } 
 });
 
@@ -18,7 +23,7 @@ app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// NEW: 1. GET Aggregate Inventory Summary for Analytics Pulse
+// 1. GET Aggregate Inventory Summary for Analytics Pulse
 app.get('/api/inventory/summary', async (_req, res) => {
     try {
         const summaryQuery = `
@@ -46,7 +51,6 @@ app.get('/api/inventory/low-stock', async (_req, res) => {
                 p.name AS asset_class, 
                 p.material_name AS material, 
                 p.retailprice AS price,
-                -- Translate cryptic Warehouse IDs into clear human locations!
                 CASE 
                     WHEN i.warehouseid = 101 THEN '📍 Detroit Assembly Plant'
                     WHEN i.warehouseid = 202 THEN '📍 Chicago Distribution Hub'
@@ -100,12 +104,13 @@ app.post('/api/inventory/adjust', async (req, res) => {
 
 // 4. PUT: Structural Key Mutation
 app.put('/api/inventory/update-keys', async (req, res) => {
-    const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
+    const { oldPartId, newPartId, newWarehouseId } = req.body;
+    
+    // FIXED: Properly checking out a single pool client to handle sequential transaction statements safely
+    const client = await db.connect();
     try {
-        await db.query('BEGIN');
+        await client.query('BEGIN');
 
-        // 1. Update the item's main catalog number in the partstable
-        // If the ID is the same (e.g. 1 to 1), this cleanly skips modification
         if (oldPartId !== newPartId) {
             await client.query(`
                 UPDATE public.partstable 
@@ -114,9 +119,6 @@ app.put('/api/inventory/update-keys', async (req, res) => {
             `, [newPartId, oldPartId]);
         }
 
-        // 2. SMART LOGISTICS UPDATE (Prevents Key Collision)
-        // This checks if the new location already tracks this item.
-        // If it does, it updates it. If it doesn't, it creates it cleanly.
         const upsertInventoryQuery = `
             INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand)
             VALUES ($1, $2, 'TRANSFER-ZONE', 1)
@@ -128,12 +130,10 @@ app.put('/api/inventory/update-keys', async (req, res) => {
         
         await client.query(upsertInventoryQuery, [newPartId, newWarehouseId]);
 
-        // Commit the transaction to the Azure database
         await client.query('COMMIT');
         res.status(200).json({ success: true });
 
     } catch (err) {
-        // If anything goes wrong, safely rollback so data isn't corrupted
         await client.query('ROLLBACK');
         console.error("Logistics Update Failed:", err);
         res.status(500).json({ success: false, error: err.message });
