@@ -44,30 +44,35 @@ app.get('/api/inventory/summary', async (_req, res) => {
     }
 });
 
-// 2. GET: Fetch Dashboard Items
-app.get('/api/inventory/low-stock', async (_req, res) => {
+app.get('/api/inventory/low-stock', async (req, res) => {
     try {
-        const queryText = `
+        const { warehouse } = req.query; // Capture ?warehouse=101 from URL
+        
+        let queryText = `
             SELECT 
-                p.sku, 
-                p.name, 
-                p.material_name, 
-                p.retailprice,
-                i.warehouseid,
-                i.quantityonhand,
-                p.minimumstocklevel,
+                p.sku, p.name, p.material_name, p.retailprice,
+                i.warehouseid, i.quantityonhand, p.minimumstocklevel, p.partid,
                 CASE 
                     WHEN i.warehouseid = 101 THEN '📍 Detroit Assembly Plant'
                     WHEN i.warehouseid = 202 THEN '📍 Chicago Distribution Hub'
                     ELSE '📍 Unknown Node (' || i.warehouseid || ')'
                 END AS node_loc
             FROM public.partstable p
-            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid;
+            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
         `;
-        const result = await db.query(queryText);
+
+        const queryParams = [];
+        
+        // Dynamic SQL filtering
+        if (warehouse && warehouse !== 'all') {
+            queryText += ` WHERE i.warehouseid = $1`;
+            queryParams.push(parseInt(warehouse));
+        }
+
+        const result = await db.query(queryText, queryParams);
         res.json(result.rows);
     } catch (err) {
-        console.error("Backend failed to read tracking views:", err);
+        console.error(err);
         res.status(500).json({ error: "Failed to extract inventory tracking items" });
     }
 });
