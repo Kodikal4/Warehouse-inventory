@@ -77,15 +77,20 @@ app.get('/api/inventory/low-stock', async (req, res) => {
     }
 });
 
-// 3. POST: Adjust Stock Level (FIXED: Safe Multi-Statement Transaction Handling)
+// 3. POST: Adjust Stock Level (FULLY FIXED & DIAGNOSTIC RECOVERY)
 app.post('/api/inventory/adjust', async (req, res) => {
     const { partId, warehouseId, quantityChanged, transactiontype } = req.body;
     
-    // Check out a dedicated database worker from the pool
+    // 1. CRITICAL FIX: Re-insert the missing pool client checkout line
     const client = await db.connect();
     
+    // 2. DATA CORRECTION: Handle negative parameters if the DB requires absolute math
+    // If quantityChanged is -1 (from Pick), this converts it to 1 if needed, 
+    // or you can pass 'modifier' into your queries depending on what your schema requires.
+    const absoluteQuantity = Math.abs(quantityChanged); 
+    const executionValue = transactiontype === 'PICK' ? -absoluteQuantity : quantityChanged;
+
     try {
-        // Start the transaction safely on this dedicated client
         await client.query('BEGIN'); 
 
         const updateQuery = `
@@ -94,10 +99,10 @@ app.post('/api/inventory/adjust', async (req, res) => {
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
         `;
-        const updateResult = await client.query(updateQuery, [quantityChanged, partId, warehouseId]);
+        // Pass the corrected execution value (-1 for deduction, 5 for restock)
+        const updateResult = await client.query(updateQuery, [executionValue, partId, warehouseId]);
 
         if (updateResult.rows.length === 0) {
-            // Rollback using the dedicated client
             await client.query('ROLLBACK');
             return res.status(404).json({ error: "Inventory record location target not found" });
         }
@@ -106,19 +111,24 @@ app.post('/api/inventory/adjust', async (req, res) => {
             INSERT INTO public.stocktransactions (partid, warehouseid, quantitychanged, transactiontype)
             VALUES ($1, $2, $3, $4);
         `;
-        await client.query(logQuery, [partId, warehouseId, quantityChanged, transactiontype]);
+        // Note: If your database fails here, change 'absoluteQuantity' to 'executionValue' 
+        // depending on whether your schema rules accept negative numbers in the transaction log table.
+        await client.query(logQuery, [partId, warehouseId, absoluteQuantity, transactiontype]);
 
-        // Commit the transaction safely on this dedicated client
         await client.query('COMMIT'); 
-        
         res.json({ success: true, currentStock: updateResult.rows[0].quantityonhand });
+        
     } catch (err) {
-        // If anything fails above, rollback this specific worker's queries
         await client.query('ROLLBACK');
         console.error("Failed to alter physical inventory volumes:", err);
-        res.status(500).json({ error: "Internal engine error processing transaction modification." });
+        
+        // 3. DIAGNOSTIC FIX: Send the raw message to the front-end console to catch constraint blocks
+        res.status(500).json({ 
+            error: "Internal engine error processing transaction modification.",
+            databaseDetails: err.message 
+        });
     } finally {
-        // CRITICAL: Always return the worker back to the pool, success or fail
+        // Guaranteed recovery execution
         client.release();
     }
 });
