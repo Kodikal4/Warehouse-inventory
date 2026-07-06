@@ -77,11 +77,16 @@ app.get('/api/inventory/low-stock', async (req, res) => {
     }
 });
 
-// 3. POST: Adjust Stock Level 
+// 3. POST: Adjust Stock Level (FIXED: Safe Multi-Statement Transaction Handling)
 app.post('/api/inventory/adjust', async (req, res) => {
     const { partId, warehouseId, quantityChanged, transactiontype } = req.body;
+    
+    // Check out a dedicated database worker from the pool
+    const client = await db.connect();
+    
     try {
-        await db.query('BEGIN'); 
+        // Start the transaction safely on this dedicated client
+        await client.query('BEGIN'); 
 
         const updateQuery = `
             UPDATE public.inventorybalancestable 
@@ -89,10 +94,11 @@ app.post('/api/inventory/adjust', async (req, res) => {
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
         `;
-        const updateResult = await db.query(updateQuery, [quantityChanged, partId, warehouseId]);
+        const updateResult = await client.query(updateQuery, [quantityChanged, partId, warehouseId]);
 
         if (updateResult.rows.length === 0) {
-            await db.query('ROLLBACK');
+            // Rollback using the dedicated client
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: "Inventory record location target not found" });
         }
 
@@ -100,14 +106,20 @@ app.post('/api/inventory/adjust', async (req, res) => {
             INSERT INTO public.stocktransactions (partid, warehouseid, quantitychanged, transactiontype)
             VALUES ($1, $2, $3, $4);
         `;
-        await db.query(logQuery, [partId, warehouseId, quantityChanged, transactiontype]);
+        await client.query(logQuery, [partId, warehouseId, quantityChanged, transactiontype]);
 
-        await db.query('COMMIT'); 
+        // Commit the transaction safely on this dedicated client
+        await client.query('COMMIT'); 
+        
         res.json({ success: true, currentStock: updateResult.rows[0].quantityonhand });
     } catch (err) {
-        await db.query('ROLLBACK');
+        // If anything fails above, rollback this specific worker's queries
+        await client.query('ROLLBACK');
         console.error("Failed to alter physical inventory volumes:", err);
         res.status(500).json({ error: "Internal engine error processing transaction modification." });
+    } finally {
+        // CRITICAL: Always return the worker back to the pool, success or fail
+        client.release();
     }
 });
 
