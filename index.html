@@ -30,6 +30,7 @@
             grid-template-columns: 1.2fr 1.8fr 1.2fr 1fr 1.8fr 1.2fr 1.3fr 1.4fr;
             align-items: center;
             padding: 14px;
+            gap: 16px;
             border-bottom: 1px solid #334155;
         }
         .inventory-grid-header { background-color: #1e293b; font-weight: bold; color: #94a3b8; border-radius: 6px 6px 0 0; font-size: 13px; letter-spacing: 0.03em; }
@@ -287,11 +288,23 @@
                 const response = await fetch('/api/inventory/adjust', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ partId, warehouseId, quantityChanged: -1, transactiontype: 'PICK' })
+                    body: JSON.stringify({ partId, warehouseId, quantityChanged: 1, transactiontype: 'PICK' })
                 });
-                if (response.ok) loadDashboard();
+                
+                if (response.ok) {
+                    loadDashboard();
+                } else {
+                    // Read the JSON error error data sent by the backend catch block
+                    const errorData = await response.json();
+                    console.error("❌ Stock Pick Failed on Server:");
+                    console.error("Engine Error Message:", errorData.error);
+                    console.error("PostgreSQL Raw Database Message:", errorData.databaseDetails);
+                    
+                    // Show an alert indicating what exactly went wrong
+                    alert(`Could not complete Pick:\n\nDatabase rules rejected this transaction.\nDetails: ${errorData.databaseDetails || 'Unknown database block'}`);
+                }
             } catch (error) {
-                console.error("Network interface error:", error);
+                console.error("Network communication breakdown:", error);
             }
         }
 
