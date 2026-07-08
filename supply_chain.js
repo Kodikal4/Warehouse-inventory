@@ -60,7 +60,7 @@ app.get('/api/inventory/low-stock', async (req, res) => {
             FROM public.partstable p
             LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
         `;
-        
+
         const queryParams = [];
         
         // Dynamic SQL filtering
@@ -168,6 +168,17 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     } catch (err) {
         await client.query('ROLLBACK');
         console.error("Logistics Update Failed:", err);
+
+        // Friendly translation for the Foreign Key constraint violation
+        let customError = err.message;
+        if (err.message.includes("violates foreign key constraint")) {
+            if (err.message.includes("warehouseid")) {
+                    customError = "The Facility ID you entered does not exist in the master registry. Please use a registered location (like 101 or 202).";
+            } else if (err.message.includes("partid")) {
+                    customError = "The Target Part ID you entered could not be found in the system catalog.";
+            }
+        }
+        
         res.status(500).json({ success: false, error: err.message });
     } finally {
         client.release();
