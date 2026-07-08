@@ -51,7 +51,7 @@ app.get('/api/inventory/low-stock', async (req, res) => {
         let queryText = `
             SELECT 
                 p.sku, p.name, p.material_name, p.retailprice,
-                i.warehouseid, i.quantityonhand, p.minimumstocklevel, p.partid,
+                i.warehouseid, i.quantityonhand, i.datecheckedout, p.minimumstocklevel, p.partid,
                 CASE 
                     WHEN i.warehouseid = 101 THEN '📍 Detroit Assembly Plant'
                     WHEN i.warehouseid = 202 THEN '📍 Chicago Distribution Hub'
@@ -60,7 +60,7 @@ app.get('/api/inventory/low-stock', async (req, res) => {
             FROM public.partstable p
             LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
         `;
-
+        
         const queryParams = [];
         
         // Dynamic SQL filtering
@@ -95,7 +95,8 @@ app.post('/api/inventory/adjust', async (req, res) => {
 
         const updateQuery = `
             UPDATE public.inventorybalancestable 
-            SET quantityonhand = quantityonhand + $1 
+            SET quantityonhand = quantityonhand + $1,
+                datecheckedout = CURRENT_TIMESTAMP
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
         `;
