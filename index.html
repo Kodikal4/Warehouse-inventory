@@ -178,7 +178,6 @@
                     const checkoutDate = item.datecheckedout 
                         ? new Date(item.datecheckedout).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) 
                         : '—';
-
                     // Allocation Bar Percentage Calculation
                     const percent = Math.min((item.quantityonhand / 10) * 100, 100);
                     const barColor = item.quantityonhand <= item.minimumstocklevel ? '#ef4444' : '#3b82f6';
