@@ -43,14 +43,15 @@ app.get('/api/inventory/summary', async (_req, res) => {
     }
 });
 
-// 2. GET Live Stock Catalog Entries
-app.get('/api/inventory/low-stock', async (req, res) => {
+// 2. GET Live Stock Catalog Entries - FIXED ROUTE AND PARAMETERS
+app.get('/api/inventory', async (req, res) => {
     try {
-        const { warehouse } = req.query;
+        // The frontend drop-down filters send "warehouseId", not "warehouse"
+        const { warehouseId } = req.query; 
         
         let queryText = `
             SELECT 
-                p.sku, p.name, p.material_name, p.retailprice,
+                p.sku, p.name, p.material_name AS material, p.retailprice,
                 i.warehouseid, i.quantityonhand, i.datecheckedout, p.minimumstocklevel, p.partid,
                 w.facility_name AS node_loc
             FROM public.partstable p
@@ -59,9 +60,10 @@ app.get('/api/inventory/low-stock', async (req, res) => {
         `;
 
         const queryParams = [];
-        if (warehouse && warehouse !== 'all') {
+        // Support both "all" and undefined/empty states safely
+        if (warehouseId && warehouseId !== 'all' && warehouseId !== '') {
             queryText += ` WHERE i.warehouseid = $1`;
-            queryParams.push(parseInt(warehouse));
+            queryParams.push(parseInt(warehouseId));
         }
 
         queryText += ` ORDER BY p.partid ASC`;
@@ -69,7 +71,7 @@ app.get('/api/inventory/low-stock', async (req, res) => {
         const result = await db.query(queryText, queryParams);
         res.json(result.rows);
     } catch (err) {
-        console.error(err);
+        console.error("Failed to extract inventory tracking items:", err);
         res.status(500).json({ error: "Failed to extract inventory tracking items" });
     }
 });
@@ -123,7 +125,6 @@ app.post('/api/inventory/adjust', async (req, res) => {
 app.put('/api/inventory/update-keys', async (req, res) => {
     const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
     
-    // ─── ADD THIS INPUT TYPE CHECK ───
     const parsedNewPartId = parseInt(newPartId);
     const parsedNewWarehouseId = parseInt(newWarehouseId);
 
@@ -158,18 +159,17 @@ app.put('/api/inventory/update-keys', async (req, res) => {
             WHERE partid = $1 AND warehouseid = $2;
         `, [parseInt(oldPartId), parseInt(oldWarehouseId)]);
 
-        // Insert or execute UPSERT logic at destination target hub securely
+        // FIXED: Replaced &nbsp; with standard clean spacing parameters
         const upsertInventoryQuery = `
             INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand, datecheckedout)
             VALUES ($1, $2, 'RELOCATED-BAY', $3, CURRENT_TIMESTAMP)
             ON CONFLICT (partid, warehouseid) 
             DO UPDATE SET 
-            &nbsp; quantityonhand = public.inventorybalancestable.quantityonhand + EXCLUDED.quantityonhand,
-            &nbsp; binlocation = 'CONSOLIDATED-BAY',
-            &nbsp; datecheckedout = CURRENT_TIMESTAMP;
+                quantityonhand = public.inventorybalancestable.quantityonhand + EXCLUDED.quantityonhand,
+                binlocation = 'CONSOLIDATED-BAY',
+                datecheckedout = CURRENT_TIMESTAMP;
         `;
         
-        // Pass cleanly parsed variables down to pool client execute layers
         await client.query(upsertInventoryQuery, [parsedNewPartId, parsedNewWarehouseId, currentStockVolume]);
 
         await client.query('COMMIT');
@@ -179,7 +179,6 @@ app.put('/api/inventory/update-keys', async (req, res) => {
         await client.query('ROLLBACK');
         console.error("Logistics Relocation Operation Aborted:", err);
 
-        // Map database constraint message strings straight to human-friendly feedback lines
         let customError = "System constraint check rejected this transaction.";
         if (err.message.includes("violates foreign key constraint")) {
             if (err.message.includes("warehouseid")) {
@@ -199,7 +198,7 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     }
 });
 
-// 5. GET: Extract Distinct Options Dynamic Mapper (Covers all 25+ database entries)
+// 5. GET: Extract Distinct Options Dynamic Mapper
 app.get('/api/inventory/filters', async (_req, res) => {
     try {
         const skusQuery = `SELECT DISTINCT sku FROM public.partstable WHERE sku IS NOT NULL AND sku != '' ORDER BY sku ASC;`;
