@@ -5,12 +5,11 @@ const path = require('path');
 
 require('dotenv').config();
 
-
 const app = express();
 app.use(cors());
 app.use(express.json()); 
 
-// FIXED: Consolidated into a single pool using your exact Azure variable mappings
+// Single corporate master pool connections connection layer mapping
 const db = new Pool({
     connectionString: "postgresql://superman4:Postgre4231@superman4-db.postgres.database.azure.com:5432/postgres",
     ssl: { rejectUnauthorized: false }
@@ -44,30 +43,28 @@ app.get('/api/inventory/summary', async (_req, res) => {
     }
 });
 
+// 2. GET Live Stock Catalog Entries
 app.get('/api/inventory/low-stock', async (req, res) => {
     try {
-        const { warehouse } = req.query; // Capture ?warehouse=101 from URL
+        const { warehouse } = req.query;
         
         let queryText = `
             SELECT 
                 p.sku, p.name, p.material_name, p.retailprice,
                 i.warehouseid, i.quantityonhand, i.datecheckedout, p.minimumstocklevel, p.partid,
-                CASE 
-                    WHEN i.warehouseid = 101 THEN '📍 Detroit Assembly Plant'
-                    WHEN i.warehouseid = 202 THEN '📍 Chicago Distribution Hub'
-                    ELSE '📍 Unknown Node (' || i.warehouseid || ')'
-                END AS node_loc
+                w.facility_name AS node_loc
             FROM public.partstable p
-            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
+            INNER JOIN public.inventorybalancestable i ON p.partid = i.partid
+            LEFT JOIN public.warehousestable w ON i.warehouseid = w.warehouseid
         `;
 
         const queryParams = [];
-        
-        // Dynamic SQL filtering
         if (warehouse && warehouse !== 'all') {
             queryText += ` WHERE i.warehouseid = $1`;
             queryParams.push(parseInt(warehouse));
         }
+
+        queryText += ` ORDER BY p.partid ASC`;
 
         const result = await db.query(queryText, queryParams);
         res.json(result.rows);
@@ -77,16 +74,11 @@ app.get('/api/inventory/low-stock', async (req, res) => {
     }
 });
 
-// 3. POST: Adjust Stock Level (FULLY FIXED & DIAGNOSTIC RECOVERY)
+// 3. POST: Adjust Stock Level 
 app.post('/api/inventory/adjust', async (req, res) => {
     const { partId, warehouseId, quantityChanged, transactiontype } = req.body;
-    
-    // 1. CRITICAL FIX: Re-insert the missing pool client checkout line
     const client = await db.connect();
     
-    // 2. DATA CORRECTION: Handle negative parameters if the DB requires absolute math
-    // If quantityChanged is -1 (from Pick), this converts it to 1 if needed, 
-    // or you can pass 'modifier' into your queries depending on what your schema requires.
     const absoluteQuantity = Math.abs(quantityChanged); 
     const executionValue = transactiontype === 'PICK' ? -absoluteQuantity : quantityChanged;
 
@@ -100,7 +92,6 @@ app.post('/api/inventory/adjust', async (req, res) => {
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
         `;
-        // Pass the corrected execution value (-1 for deduction, 5 for restock)
         const updateResult = await client.query(updateQuery, [executionValue, partId, warehouseId]);
 
         if (updateResult.rows.length === 0) {
@@ -112,8 +103,6 @@ app.post('/api/inventory/adjust', async (req, res) => {
             INSERT INTO public.stocktransactions (partid, warehouseid, quantitychanged, transactiontype)
             VALUES ($1, $2, $3, $4);
         `;
-        // Note: If your database fails here, change 'absoluteQuantity' to 'executionValue' 
-        // depending on whether your schema rules accept negative numbers in the transaction log table.
         await client.query(logQuery, [partId, warehouseId, absoluteQuantity, transactiontype]);
 
         await client.query('COMMIT'); 
@@ -121,65 +110,77 @@ app.post('/api/inventory/adjust', async (req, res) => {
         
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error("Failed to alter physical inventory volumes:", err);
-        
-        // 3. DIAGNOSTIC FIX: Send the raw message to the front-end console to catch constraint blocks
         res.status(500).json({ 
             error: "Internal engine error processing transaction modification.",
             databaseDetails: err.message 
         });
     } finally {
-        // Guaranteed recovery execution
         client.release();
     }
 });
 
-// 4. PUT: Structural Key Mutation
+// 4. PUT: Structural Relational Location Modal Transfer
 app.put('/api/inventory/update-keys', async (req, res) => {
-    const { oldPartId, newPartId, newWarehouseId } = req.body;
-    
-    // FIXED: Properly checking out a single pool client to handle sequential transaction statements safely
+    const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
     const client = await db.connect();
+    
     try {
         await client.query('BEGIN');
 
-        if (oldPartId !== newPartId) {
-            await client.query(`
-                UPDATE public.partstable 
-                SET partid = $1 
-                WHERE partid = $2;
-            `, [newPartId, oldPartId]);
+        // Capture current operational inventory depth to migrate across locations safely
+        const balanceCheck = await client.query(`
+            SELECT quantityonhand FROM public.inventorybalancestable 
+            WHERE partid = $1 AND warehouseid = $2;
+        `, [oldPartId, oldWarehouseId]);
+
+        if (balanceCheck.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: "Source asset baseline tracking entry missing." });
         }
 
+        const currentStockVolume = balanceCheck.rows[0].quantityonhand;
+
+        // Clear source entry records to prevent duplicate tracking anomalies
+        await client.query(`
+            DELETE FROM public.inventorybalancestable 
+            WHERE partid = $1 AND warehouseid = $2;
+        `, [oldPartId, oldWarehouseId]);
+
+        // Insert or execute UPSERT logic at destination target hub securely
         const upsertInventoryQuery = `
-            INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand)
-            VALUES ($1, $2, 'TRANSFER-ZONE', 1)
+            INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand, datecheckedout)
+            VALUES ($1, $2, 'RELOCATED-BAY', $3, CURRENT_TIMESTAMP)
             ON CONFLICT (partid, warehouseid) 
             DO UPDATE SET 
-                warehouseid = EXCLUDED.warehouseid,
-                binlocation = 'RELOCATED-BAY';
+                quantityonhand = public.inventorybalancestable.quantityonhand + EXCLUDED.quantityonhand,
+                binlocation = 'CONSOLIDATED-BAY',
+                datecheckedout = CURRENT_TIMESTAMP;
         `;
         
-        await client.query(upsertInventoryQuery, [newPartId, newWarehouseId]);
+        await client.query(upsertInventoryQuery, [newPartId, newWarehouseId, currentStockVolume]);
 
         await client.query('COMMIT');
         res.status(200).json({ success: true });
 
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error("Logistics Update Failed:", err);
+        console.error("Logistics Relocation Operation Aborted:", err);
 
-        // Friendly translation for the Foreign Key constraint violation
-        let customError = err.message;
+        // Map database constraint message strings straight to human-friendly feedback lines
+        let customError = "System constraint check rejected this transaction.";
         if (err.message.includes("violates foreign key constraint")) {
             if (err.message.includes("warehouseid")) {
-                    customError = "The Facility ID you entered does not exist in the master registry. Please use a registered location (like 101 or 202).";
+                customError = "The Target Facility ID you typed is unregistered. Please check corporate codes (like 101 or 202).";
             } else if (err.message.includes("partid")) {
-                    customError = "The Target Part ID you entered could not be found in the system catalog.";
+                customError = "The designated structural unique core identity part code maps nowhere.";
             }
+        } else if (err.message.includes("violates unique constraint")) {
+            customError = "A key indexing collision occurred. Target parameters cannot accept identity modification patterns.";
+        } else {
+            customError = err.message;
         }
         
-        res.status(500).json({ success: false, error: err.message });
+        res.status(500).json({ success: false, error: customError });
     } finally {
         client.release();
     }
