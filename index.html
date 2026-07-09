@@ -224,7 +224,6 @@
         let myChartInstance = null;
         let originalFetchedDataset = []; 
 
-        // Dictionary to map raw warehouse IDs to clean display names
         const facilityNames = {
             101: "📍 Detroit Assembly Plant",
             202: "📍 Chicago Distribution Hub"
@@ -234,6 +233,97 @@
         async function runInitialSetup() {
             await loadDashboard();     // Pulls data grid rows
             await populateDropdowns(); // Automatically syncs options to database realities
+        }
+
+        // --- ADDED: Missing loadDashboard Function ---
+        async function loadDashboard() {
+            try {
+                const facilityFilter = document.getElementById('warehouseFilter').value;
+                let url = '/api/inventory';
+                if (facilityFilter !== 'all') {
+                    url += `?warehouseId=${facilityFilter}`;
+                }
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error("Failed to fetch inventory dataset.");
+                
+                const items = await response.json();
+                originalFetchedDataset = items;
+
+                // 1. Calculate Summary Metrics
+                let totalValue = 0;
+                let lowStockCount = 0;
+                const activeFacilitiesSet = new Set();
+
+                items.forEach(item => {
+                    totalValue += (item.quantityonhand * (item.retailprice || 0));
+                    activeFacilitiesSet.add(item.warehouseid);
+                    if (item.quantityonhand <= 5) { // Assuming <= 5 is critical/low threshold
+                        lowStockCount++;
+                    }
+                });
+
+                // Update Overview Metric Text Cards
+                document.getElementById('meta-value').innerText = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalValue);
+                document.getElementById('meta-nodes').innerText = activeFacilitiesSet.size;
+                document.getElementById('meta-risks').innerText = lowStockCount;
+
+                // 2. Render Left/Right Ranking Panels & Donut Chart
+                renderTopAndBottomRanks(items);
+                renderInventoryDonutChart(items);
+
+                // 3. Render Main Dynamic Data Grid Rows
+                const dataTarget = document.getElementById('inventory-data-target');
+                dataTarget.innerHTML = '';
+
+                items.forEach(item => {
+                    const statusBadge = item.quantityonhand <= 5 ? 'CRITICAL' : 'STABLE';
+                    const badgeClass = item.quantityonhand <= 5 ? 'badge-danger' : 'badge-ok';
+                    const displayLocation = facilityNames[item.warehouseid] || `Facility (${item.warehouseid})`;
+                    
+                    const row = document.createElement('div');
+                    row.className = 'inventory-grid-row';
+                    
+                    // Set custom filter row parameters evaluated by filterGridRows()
+                    row.setAttribute('data-sku', item.sku || '');
+                    row.setAttribute('data-name', item.name || '');
+                    row.setAttribute('data-material', item.material || '');
+                    row.setAttribute('data-status', statusBadge);
+
+                    // Calculate fill bar percent safely maxed at 100%
+                    const fillPercent = Math.min((item.quantityonhand / 50) * 100, 100);
+                    const fillBarColor = item.quantityonhand <= 5 ? '#ef4444' : '#3b82f6';
+
+                    row.innerHTML = `
+                        <div style="font-weight: bold; color: #cbd5e1;">${item.sku}</div>
+                        <div>
+                            ${item.name} 
+                            <br/><span class="badge ${badgeClass}" style="margin-top: 4px;">${statusBadge} LEVEL</span>
+                        </div>
+                        <div style="color: #fbbf24; font-weight: 500;">${item.material || 'N/A'}</div>
+                        <div style="color: #34d399; font-weight: bold;">$${parseFloat(item.retailprice).toFixed(2)}</div>
+                        <div style="font-size: 13px; color: #94a3b8;">${displayLocation}</div>
+                        <div>
+                            <span style="font-weight: bold;">${item.quantityonhand} units</span>
+                            <div class="load-bar-container">
+                                <div class="load-bar-fill" style="width: ${fillPercent}%; background-color: ${fillBarColor};"></div>
+                            </div>
+                        </div>
+                        <div style="font-size: 12px; color: #64748b;">${item.last_updated || 'Just Now'}</div>
+                        <div>
+                            <button class="btn-transfer" onclick="openTransferModal(${item.partid}, ${item.warehouseid}, '${item.name.replace(/'/g, "\\'")}')">📦 Transfer</button>
+                            ${item.quantityonhand <= 5 ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">🔄 Restock</button>` : ''}
+                        </div>
+                    `;
+                    dataTarget.appendChild(row);
+                });
+
+                // Apply multi-column search rules if any are preset
+                filterGridRows();
+
+            } catch (err) {
+                console.error("Critical crash loading inventory components dashboard layout:", err);
+            }
         }
 
         // 2. Metadata Populator Function
@@ -250,10 +340,8 @@
                 const transferDestDropdown = document.getElementById('modal-new-warehouseid');
                 const mainWarehouseSelect = document.getElementById('warehouseFilter');
 
-                // Clear hardcoded materials out except "All Materials" default
                 matDropdown.innerHTML = '<option value="">All Materials</option>';
 
-                // Inject live distinct SKUs
                 data.skus.forEach(sku => {
                     const opt = document.createElement('option');
                     opt.value = sku.toLowerCase();
@@ -261,7 +349,6 @@
                     skuDropdown.appendChild(opt);
                 });
 
-                // Inject live Product Names
                 data.names.forEach(name => {
                     const opt = document.createElement('option');
                     opt.value = name.toLowerCase();
@@ -269,27 +356,23 @@
                     nameDropdown.appendChild(opt);
                 });
 
-                // Inject live Materials
                 data.materials.forEach(mat => {
                     const opt = document.createElement('option');
-                    opt.value = mat.toLowerCase();;
+                    opt.value = mat.toLowerCase();
                     opt.textContent = mat;
                     matDropdown.appendChild(opt);
                 });
 
-                // BONUS: Dynamically sync your transfer modal choices to match whatever locations are added
                 if (transferDestDropdown && mainWarehouseSelect) {
                     transferDestDropdown.innerHTML = '<option value="">-- Select Destination --</option>';
                     mainWarehouseSelect.innerHTML = '<option value="all">🌐 Show All Facilities</option>';
                     
                     data.warehouses.forEach(wh => {
-                        // Main filter view selector
                         const mainOpt = document.createElement('option');
                         mainOpt.value = wh.warehouseid;
                         mainOpt.textContent = `📍 ${wh.facility_name} (${wh.warehouseid})`;
                         mainWarehouseSelect.appendChild(mainOpt);
 
-                        // Modal pop-up selector
                         const modalOpt = document.createElement('option');
                         modalOpt.value = wh.warehouseid;
                         modalOpt.textContent = `${wh.facility_name} (${wh.warehouseid})`;
@@ -302,7 +385,6 @@
             }
         }
 
-        // Swap out your old window.onload statement at the bottom with this:
         window.onload = runInitialSetup;
 
         function renderTopAndBottomRanks(items) {
@@ -338,7 +420,9 @@
         }
 
         function renderInventoryDonutChart(items) {
-            const ctx = document.getElementById('inventoryDonutChart').getContext('2d');
+            const canvasElement = document.getElementById('inventoryDonutChart');
+            if (!canvasElement) return;
+            const ctx = canvasElement.getContext('2d');
             const categories = { 'GPUs': 0, 'CPUs': 0, 'Displays': 0, 'Mainboards & Power': 0, 'Peripherals & Accessories': 0 };
             
             items.forEach(item => {
@@ -377,22 +461,19 @@
         }
 
         function filterGridRows() {
-            // 1. Grab filter selections and convert them to lowercase safely
             const skuVal = document.getElementById('col-filter-sku').value.toLowerCase();
             const nameVal = document.getElementById('col-filter-name').value.toLowerCase();
             const matVal = document.getElementById('col-filter-material').value.toLowerCase();
-            const statusVal = document.getElementById('col-filter-status').value; // Keep status as is (CRITICAL/STABLE)
+            const statusVal = document.getElementById('col-filter-status').value;
 
             const rows = document.querySelectorAll('#inventory-data-target .inventory-grid-row');
             
             rows.forEach(row => {
-                // 2. Safely read and lowercase row attributes
                 const rowSku = (row.getAttribute('data-sku') || '').toLowerCase();
                 const rowName = (row.getAttribute('data-name') || '').toLowerCase();
                 const rowMaterial = (row.getAttribute('data-material') || '').toLowerCase();
                 const rowStatus = row.getAttribute('data-status') || '';
 
-                // 3. Strict match evaluation logic 
                 const matchesSku = !skuVal || rowSku === skuVal;
                 const matchesName = !nameVal || rowName === nameVal;
                 const matchesMaterial = !matVal || rowMaterial === matVal;
@@ -463,8 +544,6 @@
                 body: JSON.stringify({ partId, warehouseId, quantityChanged: 5, transactiontype: 'RESTOCK' })
             }).then(() => loadDashboard());
         }
-
-        window.onload = loadDashboard;
     </script>
 </body>
 </html>
