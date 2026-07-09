@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <title>Global Inventory & Warehouse Manager</title>
-    <!-- Include Chart.js Library via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 20px; }
-        .dashboard-container { max-width: 1100px; margin: 0 auto; }
+        .dashboard-container { max-width: 1200px; margin: 0 auto; }
         
         /* Overview Banner */
         .hero-banner { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 24px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #334155; }
@@ -21,14 +20,13 @@
         .metric-val { font-size: 28px; font-weight: bold; color: #f8fafc; }
 
         /* Chart Canvas Panel Container */
-        .analytics-panel { background-color: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #334155; }
-        .chart-container { position: relative; height: 260px; width: 100%; }
+        .analytics-panel { background-color: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #334155; display: flex; flex-direction: column; align-items: center; }
+        .chart-container { position: relative; height: 280px; width: 100%; max-width: 500px; }
 
         /* Grid Framework */
         .inventory-grid-header, .inventory-grid-row {
             display: grid;
-
-            grid-template-columns: 1.2fr 1.8fr 1fr 1.1fr 2fr 1.1fr 1.1fr 1.3fr;
+            grid-template-columns: 1.2fr 1.8fr 1fr 1.1fr 2fr 1.1fr 1.1fr 1.5fr;
             align-items: center;
             padding: 14px;
             gap: 16px;
@@ -36,6 +34,19 @@
         }
         .inventory-grid-header { background-color: #1e293b; font-weight: bold; color: #94a3b8; border-radius: 6px 6px 0 0; font-size: 13px; letter-spacing: 0.03em; }
         .inventory-grid-row:hover { background-color: #1e293b; }
+        
+        /* Multi-Column Filter Rows Styling */
+        .filter-row { background-color: #1e293b70; border-bottom: 2px solid #334155; }
+        .filter-row input, .filter-row select {
+            width: 100%;
+            background: #0f172a;
+            border: 1px solid #475569;
+            color: #fff;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
         
         /* Visual Allocation Indicator */
         .load-bar-container { background: #475569; border-radius: 4px; height: 8px; width: 80px; overflow: hidden; margin-top: 4px; }
@@ -45,19 +56,24 @@
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
         .badge-danger { background-color: #ef4444; color: #ffffff; animation: pulse 2s infinite; }
         .badge-ok { background-color: #10b981; color: #ffffff; }
-
-        .admin-panel { background-color: #1e293b; padding: 20px; border-radius: 8px; margin-top: 30px; border: 1px solid #334155; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; color: #94a3b8; font-size: 13px; }
-        .form-group label span { color: #38bdf8; cursor: help; font-size: 12px; margin-left: 4px; }
-        .form-group input { background: #0f172a; border: 1px solid #334155; color: #fff; padding: 8px; border-radius: 4px; width: 190px; }
         
-        button { background-color: #2563eb; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: 500; }
-        button:hover { background-color: #1d4ed8; }
-        .btn-pick { background-color: #eab308; color: #0f172a; font-weight: bold; margin-right: 4px; }
-        .btn-pick:hover { background-color: #ca8a04; }
+        button { color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: 500; transition: background 0.2s; }
+        .btn-transfer { background-color: #3b82f6; color: #ffffff; font-weight: bold; margin-right: 4px; }
+        .btn-transfer:hover { background-color: #2563eb; }
         .btn-reorder { background-color: #10b981; color: white; font-size: 12px; }
         .btn-reorder:hover { background-color: #059669; }
+
+        /* Pop-up Dialog Modal Box Styles */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-content { background: #1e293b; padding: 25px; border-radius: 8px; border: 1px solid #475569; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.5); }
+        .modal-content h3 { margin-top: 0; margin-bottom: 10px; font-size: 18px; color: #f1f5f9; }
+        .modal-content label { display: block; margin: 15px 0 5px 0; color: #94a3b8; font-size: 13px; }
+        .modal-content input { background: #0f172a; border: 1px solid #475569; color: #fff; padding: 10px; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .btn-cancel { background: #475569; }
+        .btn-cancel:hover { background: #334155; }
+        .btn-confirm { background: #2563eb; }
+        .btn-confirm:hover { background: #1d4ed8; }
 
         @keyframes pulse {
             0% { opacity: 1; }
@@ -69,13 +85,11 @@
 <body>
     <div class="dashboard-container">
         
-        <!-- Welcome Introduction -->
         <div class="hero-banner">
             <h1>🏢 Global Inventory & Warehouse Manager</h1>
             <p>A dashboard that views product stock amount, monitors storage facilities, and transfers items between warehouses instantly.</p>
         </div>
 
-        <!-- Analytics Pulse Blocks -->
         <div class="pulse-metrics">
             <div class="metric-card">
                 <h4>Total On-Hand Value</h4>
@@ -91,17 +105,15 @@
             </div>
         </div>
 
-        <!-- Dynamic Chart Display Card -->
         <div class="analytics-panel">
-            <h3 style="margin-top: 0; margin-bottom: 15px; font-size: 16px; color: #cbd5e1;">📊 Stock Levels Comparison Overview</h3>
+            <h3 style="margin-top: 0; margin-bottom: 15px; font-size: 16px; color: #cbd5e1;">📊 Global Asset Volume Category Distribution</h3>
             <div class="chart-container">
-                <canvas id="inventoryBarChart"></canvas>
+                <canvas id="inventoryDonutChart"></canvas>
             </div>
         </div>
 
-        <!-- Filter Intersections -->
         <div class="filter-container" style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
-            <label for="warehouseFilter" style="color: #94a3b8; font-size: 14px; font-weight: 500;">Filter by Physical Facility:</label>
+            <label for="warehouseFilter" style="color: #94a3b8; font-size: 14px; font-weight: 500;">Filter by Physical Facility Layer:</label>
             <select id="warehouseFilter" onchange="loadDashboard()" style="padding: 8px 12px; background: #1e293b; color: white; border-radius: 4px; border: 1px solid #334155; cursor: pointer;">
                 <option value="all">🌐 Show All Facilities</option>
                 <option value="101">📍 Detroit Assembly Plant (101)</option>
@@ -109,7 +121,6 @@
             </select>
         </div>
 
-        <!-- Catalog Grid Layout -->
         <div class="inventory-grid-header">
             <div>SKU/PART NO.</div>
             <div>PRODUCT NAME</div>
@@ -121,36 +132,66 @@
             <div>STOCK ACTIONS</div>
         </div>
 
-        <div id="inventory-data-target"></div>
+        <div class="inventory-grid-header filter-row">
+            <div><input type="text" id="col-filter-sku" placeholder="Filter SKU..." oninput="filterGridRows()"></div>
+            <div><input type="text" id="col-filter-name" placeholder="Filter Name..." oninput="filterGridRows()"></div>
+            <div>
+                <select id="col-filter-material" onchange="filterGridRows()">
+                    <option value="">All Materials</option>
+                    <option value="Aluminum">Aluminum</option>
+                    <option value="Silicon">Silicon</option>
+                    <option value="OLED">OLED Matrix</option>
+                    <option value="Steel">Steel</option>
+                    <option value="Glass">Glass</option>
+                    <option value="Chassis">Zinc-Alloy</option>
+                </select>
+            </div>
+            <div></div>
+            <div></div>
+            <div>
+                <select id="col-filter-status" onchange="filterGridRows()">
+                    <option value="">All Levels</option>
+                    <option value="CRITICAL">CRITICAL LEVEL</option>
+                    <option value="STABLE">STABLE</option>
+                </select>
+            </div>
+            <div></div>
+            <div></div>
+        </div>
 
-        <!-- Administrative Transfer Form -->
-        <div class="admin-panel">
-            <h3>📦 Product Transfer & Re-Indexing Tool</h3>
-            <p style="font-size: 13px; color: #94a3b8; margin-bottom: 20px;">
-                Update an item's unique system code number or reassign its primary tracking entry to a different regional distribution hub.
+        <div id="inventory-data-target"></div>
+    </div>
+
+    <div id="transfer-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h3>📦 Transfer Item Location</h3>
+            <p style="font-size: 13px; color: #94a3b8; margin: 0 0 15px 0;">
+                Relocate item across regional nodes. The unique keys will be updated automatically.
             </p>
             
-            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <div class="form-group">
-                    <label>Target Part ID <span title="The unique database ID of the item you want to modify.">ⓘ</span></label>
-                    <input type="number" id="target-part-id" value="1">
-                </div>
-                <div class="form-group">
-                    <label>New System Part ID <span title="Assign a brand-new, unused product identifier number (e.g., 5, 6, 7) to avoid system duplicates.">ⓘ</span></label>
-                    <input type="number" id="new-part-id" placeholder="e.g. 5">
-                </div>
-                <div class="form-group">
-                    <label>New Facility ID <span title="The system ID number of the physical warehouse location where this stock entry will be moved.">ⓘ</span></label>
-                    <input type="number" id="new-warehouse-id" placeholder="e.g. 202">
-                </div>
+            <p style="font-size: 14px; color: #fff; background: #0f172a; padding: 10px; border-radius: 4px; border: 1px solid #334155;">
+                Asset: <span id="modal-part-name" style="font-weight: bold; color: #38bdf8;"></span>
+            </p>
+
+            <input type="hidden" id="modal-old-partid">
+            <input type="hidden" id="modal-old-warehouseid">
+
+            <label for="modal-new-partid">New System Part ID Code:</label>
+            <input type="number" id="modal-new-partid">
+
+            <label for="modal-new-warehouseid">Target Destination Facility ID:</label>
+            <input type="number" id="modal-new-warehouseid" placeholder="e.g., 202">
+
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeTransferModal()">Cancel</button>
+                <button class="btn-confirm" onclick="submitModalTransfer()">Confirm Transfer</button>
             </div>
-            <button onclick="updateSystemIdentifiers()">⚙️ Apply Changes & Transfer Product</button>
         </div>
     </div>
 
     <script>
-
         let myChartInstance = null;
+        let originalFetchedDataset = []; // Local master store cache for browser-side filtering
 
         async function loadDashboard() {
             try {
@@ -163,168 +204,162 @@
                     document.getElementById('meta-risks').innerText = metrics.stockout_risks;
                 }
 
-                // Capture selected filter choice element value
                 const selectedWarehouse = document.getElementById('warehouseFilter').value;
 
                 // Fetch Catalog Row Items
-                let dataset = [];
                 const response = await fetch(`/api/inventory/low-stock?warehouse=${selectedWarehouse}`);
-                if (response.ok) dataset = await response.json();
-                
-                const container = document.getElementById('inventory-data-target');
-                container.innerHTML = ''; 
-
-                dataset.forEach(item => {
-                    const checkoutDate = item.datecheckedout 
-                        ? new Date(item.datecheckedout).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) 
-                        : '—';
-                    // Allocation Bar Percentage Calculation
-                    const percent = Math.min((item.quantityonhand / 10) * 100, 100);
-                    const barColor = item.quantityonhand <= item.minimumstocklevel ? '#ef4444' : '#3b82f6';
-
-                    const isLowStock = item.quantityonhand <= item.minimumstocklevel;
-                    const statusBadge = isLowStock 
-                        ? `<span class="badge badge-danger">CRITICAL LEVEL</span>`
-                        : `<span class="badge badge-ok">STABLE</span>`;
-
-                    const reorderAction = isLowStock
-                        ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">📦 Restock</button>`
-                        : '';
-
-                    // Friendly location logic string interpolation fallback
-                    let customLocationDisplay = `Node ${item.warehouseid}`;
-                    if (item.node_loc) {
-                        customLocationDisplay = item.node_loc;
-                    } else if (item.warehouseid == 101) {
-                        customLocationDisplay = "📍 Detroit Plant (101)";
-                    } else if (item.warehouseid == 202) {
-                        customLocationDisplay = "📍 Chicago Hub (202)";
-                    }
-
-                    const row = document.createElement('div');
-                    row.className = 'inventory-grid-row';
-                    row.innerHTML = `
-                        <div style="font-weight: bold; color: #cbd5e1;">${item.sku}</div>
-                        <div>
-                            <div>${item.name}</div>
-                            ${statusBadge}
-                        </div>
-                        <div style="color: #eab308; font-size: 14px;">${item.material_name || 'Standard'}</div>
-                        <div style="color: #10b981; font-weight: bold;">$${parseFloat(item.retailprice || 0).toFixed(2)}</div>
-                        <div style="color: #94a3b8; font-size: 13px;">${customLocationDisplay}<br><span style="color:#64748b">${item.binlocation || ''}</span></div>
-                        <div>
-                            <div style="font-size: 13px;">${item.quantityonhand} units</div>
-                            <div class="load-bar-container">
-                                <div class="load-bar-fill" style="width: ${percent}%; background-color: ${barColor};"></div>
-                            </div>
-                        </div>
-                        <div style="font-size: 13px; color: #94a3b8;">${checkoutDate}</div>
-                        <div>
-                            <button class="btn-pick" onclick="executeStockPick(${item.partid}, ${item.warehouseid})">⚡ Pick</button>
-                            ${reorderAction}
-                        </div>
-                    `;
-                    container.appendChild(row);
-                });
-
-                // Update Visual Graphic Layout Panel
-                renderInventoryChart(dataset);
-
+                if (response.ok) {
+                    originalFetchedDataset = await response.json();
+                    renderGridRows(originalFetchedDataset);
+                    renderInventoryDonutChart(originalFetchedDataset);
+                }
             } catch (err) {
                 console.error("Failed to extract active dataset:", err);
             }
         }
 
-        function renderInventoryChart(items) {
-            const ctx = document.getElementById('inventoryBarChart').getContext('2d');
-            
-            // Clean arrays out of dataset object items
-            const labels = items.map(item => `${item.sku} (${item.warehouseid === 101 ? 'Detroit' : 'Chicago'})`);
-            const quantities = items.map(item => item.quantityonhand);
-            const borderColors = items.map(item => item.quantityonhand <= item.minimumstocklevel ? '#ef4444' : '#3b82f6');
-            const backgroundColors = items.map(item => item.quantityonhand <= item.minimumstocklevel ? 'rgba(239, 68, 68, 0.2)' : 'rgba(59, 130, 246, 0.2)');
+        function renderGridRows(items) {
+            const container = document.getElementById('inventory-data-target');
+            container.innerHTML = ''; 
 
-            // Wipe out older instance if it exists to clean canvas space completely
-            if (myChartInstance) {
-                myChartInstance.destroy();
-            }
+            items.forEach(item => {
+                const checkoutDate = item.datecheckedout 
+                    ? new Date(item.datecheckedout).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) 
+                    : '—';
+                
+                const percent = Math.min((item.quantityonhand / 10) * 100, 100);
+                const barColor = item.quantityonhand <= item.minimumstocklevel ? '#ef4444' : '#3b82f6';
+                const isLowStock = item.quantityonhand <= item.minimumstocklevel;
+                
+                const statusBadge = isLowStock 
+                    ? `<span class="badge badge-danger">CRITICAL LEVEL</span>`
+                    : `<span class="badge badge-ok">STABLE</span>`;
+
+                const reorderAction = isLowStock
+                    ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">Restock</button>`
+                    : '';
+
+                let customLocationDisplay = item.node_loc || `Node ${item.warehouseid}`;
+
+                const row = document.createElement('div');
+                row.className = 'inventory-grid-row';
+                // Store structural tags inside custom attributes to read during key matching cycles
+                row.setAttribute('data-sku', item.sku.toLowerCase());
+                row.setAttribute('data-name', item.name.toLowerCase());
+                row.setAttribute('data-material', item.material_name || '');
+                row.setAttribute('data-status', isLowStock ? 'CRITICAL' : 'STABLE');
+
+                row.innerHTML = `
+                    <div style="font-weight: bold; color: #cbd5e1;">${item.sku}</div>
+                    <div>
+                        <div>${item.name}</div>
+                        ${statusBadge}
+                    </div>
+                    <div class="cell-material" style="color: #eab308; font-size: 14px;">${item.material_name || 'Standard'}</div>
+                    <div style="color: #10b981; font-weight: bold;">$${parseFloat(item.retailprice || 0).toFixed(2)}</div>
+                    <div style="color: #94a3b8; font-size: 13px;">${customLocationDisplay}<br><span style="color:#64748b">${item.binlocation || ''}</span></div>
+                    <div>
+                        <div style="font-size: 13px;">${item.quantityonhand} units</div>
+                        <div class="load-bar-container">
+                            <div class="load-bar-fill" style="width: ${percent}%; background-color: ${barColor};"></div>
+                        </div>
+                    </div>
+                    <div style="font-size: 13px; color: #94a3b8;">${checkoutDate}</div>
+                    <div>
+                        <button class="btn-transfer" onclick="openTransferModal(${item.partid}, ${item.warehouseid}, '${item.name.replace(/'/g, "\\'")}')">📦 Transfer</button>
+                        ${reorderAction}
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        // Fast Browser-side Multi-column filter function execution block
+        function filterGridRows() {
+            const skuVal = document.getElementById('col-filter-sku').value.toLowerCase();
+            const nameVal = document.getElementById('col-filter-name').value.toLowerCase();
+            const matVal = document.getElementById('col-filter-material').value;
+            const statusVal = document.getElementById('col-filter-status').value;
+
+            const rows = document.querySelectorAll('#inventory-data-target .inventory-grid-row');
+            
+            rows.forEach(row => {
+                const matchesSku = row.getAttribute('data-sku').includes(skuVal);
+                const matchesName = row.getAttribute('data-name').includes(nameVal);
+                const matchesMaterial = !matVal || row.getAttribute('data-material').includes(matVal);
+                const matchesStatus = !statusVal || row.getAttribute('data-status') === statusVal;
+
+                if (matchesSku && matchesName && matchesMaterial && matchesStatus) {
+                    row.style.display = "grid";
+                } else {
+                    row.style.display = "none";
+                }
+            });
+        }
+
+        function renderInventoryDonutChart(items) {
+            const ctx = document.getElementById('inventoryDonutChart').getContext('2d');
+            
+            // Core Category Map buckets tracking
+            const categories = { 'GPUs': 0, 'CPUs': 0, 'Displays': 0, 'Mainboards & Power': 0, 'Peripherals & Accessories': 0 };
+            
+            items.forEach(item => {
+                const sku = item.sku || '';
+                const qty = item.quantityonhand || 0;
+                if (sku.startsWith('GPU')) categories['GPUs'] += qty;
+                else if (sku.startsWith('CPU')) categories['CPUs'] += qty;
+                else if (sku.startsWith('MON')) categories['Displays'] += qty;
+                else if (sku.startsWith('MOBO') || sku.startsWith('PSU') || sku.startsWith('COOL')) categories['Mainboards & Power'] += qty;
+                else categories['Peripherals & Accessories'] += qty;
+            });
+
+            if (myChartInstance) { myChartInstance.destroy(); }
 
             myChartInstance = new Chart(ctx, {
-                type: 'bar',
+                type: 'doughnut',
                 data: {
-                    labels: labels,
+                    labels: Object.keys(categories),
                     datasets: [{
-                        label: 'Physical Units Available',
-                        data: quantities,
-                        backgroundColor: backgroundColors,
-                        borderColor: borderColors,
-                        borderWidth: 1.5,
-                        borderRadius: 4
+                        label: 'Physical Asset Volume',
+                        data: Object.values(categories),
+                        backgroundColor: ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'],
+                        borderWidth: 2,
+                        borderColor: '#1e293b'
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: { color: '#94a3b8', font: { family: 'sans-serif' } },
-                            grid: { color: 'rgba(255, 255, 255, 0.05)' }
-                        },
-                        x: {
-                            ticks: { color: '#94a3b8', font: { family: 'sans-serif', size: 11 } },
-                            grid: { display: false }
-                        }
-                    },
+                    cutout: '65%',
                     plugins: {
-                        legend: { labels: { color: '#f8fafc', font: { family: 'sans-serif' } } }
+                        legend: { position: 'right', labels: { color: '#f8fafc', font: { family: 'sans-serif', size: 12 } } }
                     }
                 }
             });
         }
 
-        async function executeStockPick(partId, warehouseId) {
-            try {
-                const response = await fetch('/api/inventory/adjust', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ partId, warehouseId, quantityChanged: 1, transactiontype: 'PICK' })
-                });
-                
-                if (response.ok) {
-                    loadDashboard();
-                } else {
-                    // Read the JSON error error data sent by the backend catch block
-                    const errorData = await response.json();
-                    console.error("❌ Stock Pick Failed on Server:");
-                    console.error("Engine Error Message:", errorData.error);
-                    console.error("PostgreSQL Raw Database Message:", errorData.databaseDetails);
-                    
-                    // Show an alert indicating what exactly went wrong
-                    alert(`Could not complete Pick:\n\nDatabase rules rejected this transaction.\nDetails: ${errorData.databaseDetails || 'Unknown database block'}`);
-                }
-            } catch (error) {
-                console.error("Network communication breakdown:", error);
-            }
+        function openTransferModal(partId, warehouseId, partName) {
+            document.getElementById('modal-part-name').innerText = partName;
+            document.getElementById('modal-old-partid').value = partId;
+            document.getElementById('modal-old-warehouseid').value = warehouseId;
+            document.getElementById('modal-new-partid').value = partId; // Default match to avoid friction
+            document.getElementById('modal-new-warehouseid').value = '';
+            
+            document.getElementById('transfer-modal').style.display = "flex";
         }
 
-        
-        function dispatchRestockOrder(sku, partId, warehouseId) {
-            alert(`[AUTOMATED SUPPLY CHAIN DISPATCH]\n\nPurchase Order generated successfully for ${sku}.\nRouting 5 stock units to Warehouse Location ${warehouseId}.`);
-            fetch('/api/inventory/adjust', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ partId, warehouseId, quantityChanged: 5, transactiontype: 'RESTOCK' })
-            }).then(() => loadDashboard());
+        function closeTransferModal() {
+            document.getElementById('transfer-modal').style.display = "none";
         }
 
-        async function updateSystemIdentifiers() {
-            const targetPartIdVal = document.getElementById('target-part-id').value;
-            const newPartIdVal = document.getElementById('new-part-id').value;
-            const newWarehouseIdVal = document.getElementById('new-warehouse-id').value;
+        async function submitModalTransfer() {
+            const oldPartId = document.getElementById('modal-old-partid').value;
+            const oldWarehouseId = document.getElementById('modal-old-warehouseid').value;
+            const newPartId = document.getElementById('modal-new-partid').value;
+            const newWarehouseId = document.getElementById('modal-new-warehouseid').value;
 
-            if (!newPartIdVal || !newWarehouseIdVal) {
-                alert("Please fill out both the New System Part ID and New Facility ID fields before updating records.");
+            if (!newPartId || !newWarehouseId) {
+                alert("Please declare target configuration fields fully.");
                 return;
             }
 
@@ -333,33 +368,32 @@
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        oldPartId: parseInt(targetPartIdVal),
-                        oldWarehouseId: 101, 
-                        newPartId: parseInt(newPartIdVal),
-                        newWarehouseId: parseInt(newWarehouseIdVal)
+                        oldPartId: parseInt(oldPartId),
+                        oldWarehouseId: parseInt(oldWarehouseId),
+                        newPartId: parseInt(newPartId),
+                        newWarehouseId: parseInt(newWarehouseId)
                     })
                 });
                 
                 const status = await response.json();
                 if (status.success) {
-                    alert("🎉 Success! The product record has been transferred and system keys re-indexed cleanly.");
-                    document.getElementById('target-part-id').value = newPartIdVal;
+                    closeTransferModal();
                     loadDashboard();
                 } else {
-                    // Refined, human-friendly translation for the key collision error popup
-                    if (status.error && status.error.includes("key collision")) {
-                        alert(
-                            "📌 Product Transfer Deferred:\n\n" +
-                            "The 'New System Part ID' you typed is already allocated to another active product.\n\n" +
-                            "To complete this transfer safely without over-writing existing database data, please choose a fresh unique identifier number (like 5, 6, or 7)!"
-                        );
-                    } else {
-                        alert("Could not complete transfer: " + (status.error || "System constraint check failed."));
-                    }
+                    alert(`Could not complete transfer:\n\n${status.error || 'System constraint validation failure.'}`);
                 }
             } catch (err) {
-                console.error("Network communication breakdown:", err);
+                console.error(err);
             }
+        }
+
+        function dispatchRestockOrder(sku, partId, warehouseId) {
+            alert(`[AUTOMATED SUPPLY CHAIN DISPATCH]\n\nPurchase Order generated for ${sku}.\nRouting 5 stock units to Location ${warehouseId}.`);
+            fetch('/api/inventory/adjust', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ partId, warehouseId, quantityChanged: 5, transactiontype: 'RESTOCK' })
+            }).then(() => loadDashboard());
         }
 
         window.onload = loadDashboard;
