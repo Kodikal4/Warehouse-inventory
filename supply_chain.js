@@ -80,7 +80,7 @@ app.post('/api/inventory/adjust', async (req, res) => {
     const client = await db.connect();
     
     const absoluteQuantity = Math.abs(quantityChanged); 
-    const executionValue = transactiontype === 'PICK' ? -absoluteQuantity : quantityChanged;
+    const executionValue = transactiontype === 'PICK' ? -absoluteQuantity : absoluteQuantity;
 
     try {
         await client.query('BEGIN'); 
@@ -122,6 +122,18 @@ app.post('/api/inventory/adjust', async (req, res) => {
 // 4. PUT: Structural Relational Location Modal Transfer
 app.put('/api/inventory/update-keys', async (req, res) => {
     const { oldPartId, oldWarehouseId, newPartId, newWarehouseId } = req.body;
+    
+    // ─── ADD THIS INPUT TYPE CHECK ───
+    const parsedNewPartId = parseInt(newPartId);
+    const parsedNewWarehouseId = parseInt(newWarehouseId);
+
+    if (isNaN(parsedNewPartId) || isNaN(parsedNewWarehouseId)) {
+        return res.status(400).json({ 
+            success: false, 
+            error: "Please select a valid destination facility and provide a structural part ID configuration code." 
+        });
+    }
+
     const client = await db.connect();
     
     try {
@@ -131,7 +143,7 @@ app.put('/api/inventory/update-keys', async (req, res) => {
         const balanceCheck = await client.query(`
             SELECT quantityonhand FROM public.inventorybalancestable 
             WHERE partid = $1 AND warehouseid = $2;
-        `, [oldPartId, oldWarehouseId]);
+        `, [parseInt(oldPartId), parseInt(oldWarehouseId)]);
 
         if (balanceCheck.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -144,7 +156,7 @@ app.put('/api/inventory/update-keys', async (req, res) => {
         await client.query(`
             DELETE FROM public.inventorybalancestable 
             WHERE partid = $1 AND warehouseid = $2;
-        `, [oldPartId, oldWarehouseId]);
+        `, [parseInt(oldPartId), parseInt(oldWarehouseId)]);
 
         // Insert or execute UPSERT logic at destination target hub securely
         const upsertInventoryQuery = `
@@ -152,12 +164,13 @@ app.put('/api/inventory/update-keys', async (req, res) => {
             VALUES ($1, $2, 'RELOCATED-BAY', $3, CURRENT_TIMESTAMP)
             ON CONFLICT (partid, warehouseid) 
             DO UPDATE SET 
-                quantityonhand = public.inventorybalancestable.quantityonhand + EXCLUDED.quantityonhand,
-                binlocation = 'CONSOLIDATED-BAY',
-                datecheckedout = CURRENT_TIMESTAMP;
+            &nbsp; quantityonhand = public.inventorybalancestable.quantityonhand + EXCLUDED.quantityonhand,
+            &nbsp; binlocation = 'CONSOLIDATED-BAY',
+            &nbsp; datecheckedout = CURRENT_TIMESTAMP;
         `;
         
-        await client.query(upsertInventoryQuery, [newPartId, newWarehouseId, currentStockVolume]);
+        // Pass cleanly parsed variables down to pool client execute layers
+        await client.query(upsertInventoryQuery, [parsedNewPartId, parsedNewWarehouseId, currentStockVolume]);
 
         await client.query('COMMIT');
         res.status(200).json({ success: true });
@@ -183,6 +196,33 @@ app.put('/api/inventory/update-keys', async (req, res) => {
         res.status(500).json({ success: false, error: customError });
     } finally {
         client.release();
+    }
+});
+
+// 5. GET: Extract Distinct Options Dynamic Mapper (Covers all 25+ database entries)
+app.get('/api/inventory/filters', async (_req, res) => {
+    try {
+        const skusQuery = `SELECT DISTINCT sku FROM public.partstable WHERE sku IS NOT NULL AND sku != '' ORDER BY sku ASC;`;
+        const namesQuery = `SELECT DISTINCT name FROM public.partstable WHERE name IS NOT NULL AND name != '' ORDER BY name ASC;`;
+        const materialsQuery = `SELECT DISTINCT material_name FROM public.partstable WHERE material_name IS NOT NULL AND material_name != '' ORDER BY material_name ASC;`;
+        const warehousesQuery = `SELECT warehouseid, facility_name FROM public.warehousestable ORDER BY warehouseid ASC;`;
+
+        const [skusRes, namesRes, materialsRes, warehousesRes] = await Promise.all([
+            db.query(skusQuery),
+            db.query(namesQuery),
+            db.query(materialsQuery),
+            db.query(warehousesQuery)
+        ]);
+
+        res.json({
+            skus: skusRes.rows.map(row => row.sku),
+            names: namesRes.rows.map(row => row.name),
+            materials: materialsRes.rows.map(row => row.material_name),
+            warehouses: warehousesRes.rows
+        });
+    } catch (err) {
+        console.error("Failed to build dynamic database filter sets:", err);
+        res.status(500).json({ error: "Metadata extraction failure." });
     }
 });
 
