@@ -158,17 +158,19 @@
         </div>
 
         <div class="inventory-grid-header filter-row">
-            <div><input type="text" id="col-filter-sku" placeholder="Filter SKU..." oninput="filterGridRows()"></div>
-            <div><input type="text" id="col-filter-name" placeholder="Filter Name..." oninput="filterGridRows()"></div>
+            <div>
+                <select id="col-filter-sku" onchange="filterGridRows()">
+                    <option value="">All SKUs</option>
+                </select>
+            </div>
+            <div>
+                <select id="col-filter-name" onchange="filterGridRows()">
+                    <option value="">All Product Names</option>
+                </select>
+            </div>
             <div>
                 <select id="col-filter-material" onchange="filterGridRows()">
                     <option value="">All Materials</option>
-                    <option value="Aluminum">Aluminum</option>
-                    <option value="Silicon">Silicon</option>
-                    <option value="OLED">OLED Matrix</option>
-                    <option value="Steel">Steel</option>
-                    <option value="Glass">Glass</option>
-                    <option value="Chassis">Zinc-Alloy</option>
                 </select>
             </div>
             <div></div>
@@ -228,113 +230,80 @@
             202: "📍 Chicago Distribution Hub"
         };
 
-        async function loadDashboard() {
+        // 1. Core Loader Hook
+        async function runInitialSetup() {
+            await loadDashboard();     // Pulls data grid rows
+            await populateDropdowns(); // Automatically syncs options to database realities
+        }
+
+        // 2. Metadata Populator Function
+        async function populateDropdowns() {
             try {
-                const summaryRes = await fetch('/api/inventory/summary');
-                if (summaryRes.ok) {
-                    const metrics = await summaryRes.json();
-                    document.getElementById('meta-value').innerText = `$${parseFloat(metrics.total_value).toLocaleString([], {minimumFractionDigits: 2})}`;
-                    document.getElementById('meta-nodes').innerText = metrics.active_warehouses;
-                    document.getElementById('meta-risks').innerText = metrics.stockout_risks;
+                const response = await fetch('/api/inventory/filters');
+                if (!response.ok) return;
+
+                const data = await response.json();
+
+                const skuDropdown = document.getElementById('col-filter-sku');
+                const nameDropdown = document.getElementById('col-filter-name');
+                const matDropdown = document.getElementById('col-filter-material');
+                const transferDestDropdown = document.getElementById('modal-new-warehouseid');
+                const mainWarehouseSelect = document.getElementById('warehouseFilter');
+
+                // Clear hardcoded materials out except "All Materials" default
+                matDropdown.innerHTML = '<option value="">All Materials</option>';
+
+                // Inject live distinct SKUs
+                data.skus.forEach(sku => {
+                    const opt = document.createElement('option');
+                    opt.value = sku.toLowerCase();
+                    opt.textContent = sku;
+                    skuDropdown.appendChild(opt);
+                });
+
+                // Inject live Product Names
+                data.names.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name.toLowerCase();
+                    opt.textContent = name;
+                    nameDropdown.appendChild(opt);
+                });
+
+                // Inject live Materials
+                data.materials.forEach(mat => {
+                    const opt = document.createElement('option');
+                    opt.value = mat.toLowerCase();;
+                    opt.textContent = mat;
+                    matDropdown.appendChild(opt);
+                });
+
+                // BONUS: Dynamically sync your transfer modal choices to match whatever locations are added
+                if (transferDestDropdown && mainWarehouseSelect) {
+                    transferDestDropdown.innerHTML = '<option value="">-- Select Destination --</option>';
+                    mainWarehouseSelect.innerHTML = '<option value="all">🌐 Show All Facilities</option>';
+                    
+                    data.warehouses.forEach(wh => {
+                        // Main filter view selector
+                        const mainOpt = document.createElement('option');
+                        mainOpt.value = wh.warehouseid;
+                        mainOpt.textContent = `📍 ${wh.facility_name} (${wh.warehouseid})`;
+                        mainWarehouseSelect.appendChild(mainOpt);
+
+                        // Modal pop-up selector
+                        const modalOpt = document.createElement('option');
+                        modalOpt.value = wh.warehouseid;
+                        modalOpt.textContent = `${wh.facility_name} (${wh.warehouseid})`;
+                        transferDestDropdown.appendChild(modalOpt);
+                    });
                 }
 
-                const selectedWarehouse = document.getElementById('warehouseFilter').value;
-
-                const response = await fetch(`/api/inventory/low-stock?warehouse=${selectedWarehouse}`);
-                if (response.ok) {
-                    originalFetchedDataset = await response.json();
-                    renderGridRows(originalFetchedDataset);
-                    renderTopAndBottomRanks(originalFetchedDataset); 
-                    renderInventoryDonutChart(originalFetchedDataset);
-                }
             } catch (err) {
-                console.error("Failed to extract active dataset:", err);
+                console.error("Could not complete automatic dropdown mapping layout configuration:", err);
             }
         }
 
-        function renderGridRows(items) {
-            const container = document.getElementById('inventory-data-target');
-            container.innerHTML = ''; 
-
-            items.forEach(item => {
-                const checkoutDate = item.datecheckedout 
-                    ? new Date(item.datecheckedout).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) 
-                    : '—';
-                
-                const percent = Math.min((item.quantityonhand / 10) * 100, 100);
-                const barColor = item.quantityonhand <= item.minimumstocklevel ? '#ef4444' : '#3b82f6';
-                const isLowStock = item.quantityonhand <= item.minimumstocklevel;
-                
-                const statusBadge = isLowStock 
-                    ? `<span class="badge badge-danger">CRITICAL LEVEL</span>`
-                    : `<span class="badge badge-ok">STABLE</span>`;
-
-                const reorderAction = isLowStock
-                    ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">Restock</button>`
-                    : '';
-
-                // Fallback sequence logic checking explicit column query strings vs structural lookup dict maps
-                let customLocationDisplay = item.node_loc || facilityNames[item.warehouseid] || `Node ${item.warehouseid}`;
-
-                const row = document.createElement('div');
-                row.className = 'inventory-grid-row';
-                
-                row.setAttribute('data-sku', String(item.sku || '').trim().toLowerCase());
-                row.setAttribute('data-name', String(item.name || '').trim().toLowerCase());
-                row.setAttribute('data-material', String(item.material_name || 'Standard').trim());
-                row.setAttribute('data-status', isLowStock ? 'CRITICAL' : 'STABLE');
-
-                row.innerHTML = `
-                    <div style="font-weight: bold; color: #cbd5e1;">${item.sku}</div>
-                    <div>
-                        <div>${item.name}</div>
-                        ${statusBadge}
-                    </div>
-                    <div class="cell-material" style="color: #eab308; font-size: 14px;">${item.material_name || 'Standard'}</div>
-                    <div style="color: #10b981; font-weight: bold;">$${parseFloat(item.retailprice || 0).toFixed(2)}</div>
-                    <div style="color: #94a3b8; font-size: 13px;">${customLocationDisplay}<br><span style="color:#64748b">${item.binlocation || ''}</span></div>
-                    <div>
-                        <div style="font-size: 13px;">${item.quantityonhand} units</div>
-                        <div class="load-bar-container">
-                            <div class="load-bar-fill" style="width: ${percent}%; background-color: ${barColor};"></div>
-                        </div>
-                    </div>
-                    <div style="font-size: 13px; color: #94a3b8;">${checkoutDate}</div>
-                    <div>
-                        <button class="btn-transfer" onclick="openTransferModal(${item.partid}, ${item.warehouseid}, '${item.name.replace(/'/g, "\\'")}')">📦 Transfer</button>
-                        ${reorderAction}
-                    </div>
-                `;
-                container.appendChild(row);
-            });
-        }
-
-        function filterGridRows() {
-            const skuVal = document.getElementById('col-filter-sku').value.trim().toLowerCase();
-            const nameVal = document.getElementById('col-filter-name').value.trim().toLowerCase();
-            const matVal = document.getElementById('col-filter-material').value;
-            const statusVal = document.getElementById('col-filter-status').value;
-
-            const rows = document.querySelectorAll('#inventory-data-target .inventory-grid-row');
-            
-            rows.forEach(row => {
-                const rowSku = row.getAttribute('data-sku');
-                const rowName = row.getAttribute('data-name');
-                const rowMaterial = row.getAttribute('data-material');
-                const rowStatus = row.getAttribute('data-status');
-
-                const matchesSku = rowSku.includes(skuVal);
-                const matchesName = rowName.includes(nameVal);
-                const matchesMaterial = !matVal || rowMaterial === matVal;
-                const matchesStatus = !statusVal || rowStatus === statusVal;
-
-                if (matchesSku && matchesName && matchesMaterial && matchesStatus) {
-                    row.style.display = "grid";
-                } else {
-                    row.style.display = "none";
-                }
-            });
-        }
+        // Swap out your old window.onload statement at the bottom with this:
+        window.onload = runInitialSetup;
 
         function renderTopAndBottomRanks(items) {
             if (!items || items.length === 0) return;
@@ -403,6 +372,36 @@
                     plugins: {
                         legend: { position: 'right', labels: { color: '#f8fafc', font: { family: 'sans-serif', size: 12 } } }
                     }
+                }
+            });
+        }
+
+        function filterGridRows() {
+            // 1. Grab filter selections and convert them to lowercase safely
+            const skuVal = document.getElementById('col-filter-sku').value.toLowerCase();
+            const nameVal = document.getElementById('col-filter-name').value.toLowerCase();
+            const matVal = document.getElementById('col-filter-material').value.toLowerCase();
+            const statusVal = document.getElementById('col-filter-status').value; // Keep status as is (CRITICAL/STABLE)
+
+            const rows = document.querySelectorAll('#inventory-data-target .inventory-grid-row');
+            
+            rows.forEach(row => {
+                // 2. Safely read and lowercase row attributes
+                const rowSku = (row.getAttribute('data-sku') || '').toLowerCase();
+                const rowName = (row.getAttribute('data-name') || '').toLowerCase();
+                const rowMaterial = (row.getAttribute('data-material') || '').toLowerCase();
+                const rowStatus = row.getAttribute('data-status') || '';
+
+                // 3. Strict match evaluation logic 
+                const matchesSku = !skuVal || rowSku === skuVal;
+                const matchesName = !nameVal || rowName === nameVal;
+                const matchesMaterial = !matVal || rowMaterial === matVal;
+                const matchesStatus = !statusVal || rowStatus === statusVal;
+
+                if (matchesSku && matchesName && matchesMaterial && matchesStatus) {
+                    row.style.display = "grid";
+                } else {
+                    row.style.display = "none";
                 }
             });
         }
