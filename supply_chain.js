@@ -159,7 +159,6 @@ app.put('/api/inventory/update-keys', async (req, res) => {
             WHERE partid = $1 AND warehouseid = $2;
         `, [parseInt(oldPartId), parseInt(oldWarehouseId)]);
 
-        // FIXED: Replaced &nbsp; with standard clean spacing parameters
         const upsertInventoryQuery = `
             INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand, datecheckedout)
             VALUES ($1, $2, 'RELOCATED-BAY', $3, CURRENT_TIMESTAMP)
@@ -198,18 +197,40 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     }
 });
 
-// 5. GET: Extract Distinct Options Dynamic Mapper
-app.get('/api/inventory/filters', async (_req, res) => {
+// 5. GET: Extract Distinct Options Dynamic Mapper (UPDATED FOR CASCADING FILTERS)
+app.get('/api/inventory/filters', async (req, res) => {
     try {
-        const skusQuery = `SELECT DISTINCT sku FROM public.partstable WHERE sku IS NOT NULL AND sku != '' ORDER BY sku ASC;`;
-        const namesQuery = `SELECT DISTINCT name FROM public.partstable WHERE name IS NOT NULL AND name != '' ORDER BY name ASC;`;
-        const materialsQuery = `SELECT DISTINCT material_name FROM public.partstable WHERE material_name IS NOT NULL AND material_name != '' ORDER BY material_name ASC;`;
+        const { sku, name, material } = req.query;
+
+        // Base structural array for parameters
+        const clauses = [];
+        const params = [];
+
+        if (sku) {
+            params.push(sku);
+            clauses.push(`sku = $${params.length}`);
+        }
+        if (name) {
+            params.push(name);
+            clauses.push(`name = $${params.length}`);
+        }
+        if (material) {
+            params.push(material);
+            clauses.push(`material_name = $${params.length}`);
+        }
+
+        const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+
+        // Dynamic Query generation relying on active relationships
+        const skusQuery = `SELECT DISTINCT sku FROM public.partstable ${whereClause ? whereClause + ' AND' : 'WHERE'} sku IS NOT NULL AND sku != '' ORDER BY sku ASC;`;
+        const namesQuery = `SELECT DISTINCT name FROM public.partstable ${whereClause ? whereClause + ' AND' : 'WHERE'} name IS NOT NULL AND name != '' ORDER BY name ASC;`;
+        const materialsQuery = `SELECT DISTINCT material_name FROM public.partstable ${whereClause ? whereClause + ' AND' : 'WHERE'} material_name IS NOT NULL AND material_name != '' ORDER BY material_name ASC;`;
         const warehousesQuery = `SELECT warehouseid, facility_name FROM public.warehousestable ORDER BY warehouseid ASC;`;
 
         const [skusRes, namesRes, materialsRes, warehousesRes] = await Promise.all([
-            db.query(skusQuery),
-            db.query(namesQuery),
-            db.query(materialsQuery),
+            db.query(skusQuery, params),
+            db.query(namesQuery, params),
+            db.query(materialsQuery, params),
             db.query(warehousesQuery)
         ]);
 
@@ -222,6 +243,55 @@ app.get('/api/inventory/filters', async (_req, res) => {
     } catch (err) {
         console.error("Failed to build dynamic database filter sets:", err);
         res.status(500).json({ error: "Metadata extraction failure." });
+    }
+});
+
+// 6. POST: Register a New Storage or Production Facility
+app.post('/api/inventory/facilities', async (req, res) => {
+    const { facilityName, warehouseId } = req.body;
+
+    if (!facilityName || facilityName.trim() === '') {
+        return res.status(400).json({ success: false, error: "Facility name cannot be empty." });
+    }
+
+    try {
+        // If your warehouseid is a SERIAL auto-incrementing key, omit it from the insert statement.
+        // If it's a manual input code (like 101, 202), we include it explicitly.
+        let insertQuery;
+        let queryParams;
+
+        if (warehouseId) {
+            insertQuery = `
+                INSERT INTO public.warehousestable (warehouseid, facility_name)
+                VALUES ($1, $2)
+                RETURNING warehouseid, facility_name;
+            `;
+            queryParams = [parseInt(warehouseId), facilityName.trim()];
+        } else {
+            insertQuery = `
+                INSERT INTO public.warehousestable (facility_name)
+                VALUES ($1)
+                RETURNING warehouseid, facility_name;
+            `;
+            queryParams = [facilityName.trim()];
+        }
+
+        const result = await db.query(insertQuery, queryParams);
+        
+        res.status(201).json({ 
+            success: true, 
+            message: "New facility registered successfully.",
+            facility: result.rows[0] 
+        });
+    } catch (err) {
+        console.error("Failed to insert new facility structural node:", err);
+        
+        let customError = "Failed to register facility due to an internal engine error.";
+        if (err.message.includes("unique constraint")) {
+            customError = "A facility with this ID or Name already exists in the corporate registry.";
+        }
+        
+        res.status(500).json({ success: false, error: customError });
     }
 });
 
