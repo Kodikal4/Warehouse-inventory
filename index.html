@@ -141,9 +141,19 @@
             <label for="warehouseFilter" style="color: #94a3b8; font-size: 14px; font-weight: 500;">Filter by Physical Facility Layer:</label>
             <select id="warehouseFilter" onchange="loadDashboard()" style="padding: 8px 12px; background: #1e293b; color: white; border-radius: 4px; border: 1px solid #334155; cursor: pointer;">
                 <option value="all">🌐 Show All Facilities</option>
-                <option value="101">📍 Detroit Assembly Plant (101)</option>
-                <option value="202">📍 Chicago Distribution Hub (202)</option>
             </select>
+        </div>
+
+        <div class="facility-management-card" style="background: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 20px; color: #fff;">
+            <h3>Add Corporate Logistics Facility</h3>
+            <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 15px;">Register a new inventory node (e.g., Pittsburgh Factory, Toronto Gaming Studio).</p>
+    
+            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                <input type="number" id="newFacilityId" placeholder="Facility ID (e.g., 303)" style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 8px; border-radius: 4px; width: 150px;">
+                <input type="text" id="newFacilityName" placeholder="Facility Name (e.g., Pittsburgh Factory)" style="background: #0f172a; border: 1px solid #334155; color: #fff; padding: 8px; border-radius: 4px; flex-grow: 1;">
+                <button onclick="submitNewFacility()" style="background: #3b82f6; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;">Register Node</button>
+            </div>
+            <div id="facilityFeedbackMessage" style="margin-top: 10px; font-size: 0.9rem;"></div>
         </div>
 
         <div class="inventory-grid-header">
@@ -209,8 +219,6 @@
             <label for="modal-new-warehouseid">Target Destination Facility:</label>
             <select id="modal-new-warehouseid">
                 <option value="">-- Select Destination --</option>
-                <option value="101">Detroit Assembly Plant (101)</option>
-                <option value="202">Chicago Distribution Hub (202)</option>
             </select>
 
             <div class="modal-actions">
@@ -223,19 +231,44 @@
     <script>
         let myChartInstance = null;
         let originalFetchedDataset = []; 
+        let facilityNames = {};
 
-        const facilityNames = {
-            101: "📍 Detroit Assembly Plant",
-            202: "📍 Chicago Distribution Hub"
-        };
-
-        // 1. Core Loader Hook
         async function runInitialSetup() {
-            await loadDashboard();     // Pulls data grid rows
-            await populateDropdowns(); // Automatically syncs options to database realities
+            await populateStaticWarehouseFilters(); // Pull active facilities from API first
+            await loadDashboard();                 
         }
 
-        // --- ADDED: Missing loadDashboard Function ---
+        // Populates the primary structural location dropdowns from backend
+        async function populateStaticWarehouseFilters() {
+            try {
+                const response = await fetch('/api/inventory/filters');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                const mainWarehouseSelect = document.getElementById('warehouseFilter');
+                const transferDestDropdown = document.getElementById('modal-new-warehouseid');
+
+                mainWarehouseSelect.innerHTML = '<option value="all">🌐 Show All Facilities</option>';
+                transferDestDropdown.innerHTML = '<option value="">-- Select Destination --</option>';
+
+                data.warehouses.forEach(wh => {
+                    facilityNames[wh.warehouseid] = `📍 ${wh.facility_name}`;
+                    
+                    const mainOpt = document.createElement('option');
+                    mainOpt.value = wh.warehouseid;
+                    mainOpt.textContent = `📍 ${wh.facility_name} (${wh.warehouseid})`;
+                    mainWarehouseSelect.appendChild(mainOpt);
+
+                    const modalOpt = document.createElement('option');
+                    modalOpt.value = wh.warehouseid;
+                    modalOpt.textContent = `${wh.facility_name} (${wh.warehouseid})`;
+                    transferDestDropdown.appendChild(modalOpt);
+                });
+            } catch (err) {
+                console.error("Failed to build initial facility configurations:", err);
+            }
+        }
+
         async function loadDashboard() {
             try {
                 const facilityFilter = document.getElementById('warehouseFilter').value;
@@ -250,7 +283,6 @@
                 const items = await response.json();
                 originalFetchedDataset = items;
 
-                // 1. Calculate Summary Metrics
                 let totalValue = 0;
                 let lowStockCount = 0;
                 const activeFacilitiesSet = new Set();
@@ -258,21 +290,18 @@
                 items.forEach(item => {
                     totalValue += (item.quantityonhand * (item.retailprice || 0));
                     activeFacilitiesSet.add(item.warehouseid);
-                    if (item.quantityonhand <= 5) { // Assuming <= 5 is critical/low threshold
+                    if (item.quantityonhand <= 5) {
                         lowStockCount++;
                     }
                 });
 
-                // Update Overview Metric Text Cards
                 document.getElementById('meta-value').innerText = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalValue);
                 document.getElementById('meta-nodes').innerText = activeFacilitiesSet.size;
                 document.getElementById('meta-risks').innerText = lowStockCount;
 
-                // 2. Render Left/Right Ranking Panels & Donut Chart
                 renderTopAndBottomRanks(items);
                 renderInventoryDonutChart(items);
 
-                // 3. Render Main Dynamic Data Grid Rows
                 const dataTarget = document.getElementById('inventory-data-target');
                 dataTarget.innerHTML = '';
 
@@ -284,13 +313,11 @@
                     const row = document.createElement('div');
                     row.className = 'inventory-grid-row';
                     
-                    // Set custom filter row parameters evaluated by filterGridRows()
                     row.setAttribute('data-sku', item.sku || '');
                     row.setAttribute('data-name', item.name || '');
                     row.setAttribute('data-material', item.material || '');
                     row.setAttribute('data-status', statusBadge);
 
-                    // Calculate fill bar percent safely maxed at 100%
                     const fillPercent = Math.min((item.quantityonhand / 50) * 100, 100);
                     const fillBarColor = item.quantityonhand <= 5 ? '#ef4444' : '#3b82f6';
 
@@ -309,7 +336,7 @@
                                 <div class="load-bar-fill" style="width: ${fillPercent}%; background-color: ${fillBarColor};"></div>
                             </div>
                         </div>
-                        <div style="font-size: 12px; color: #64748b;">${item.last_updated || 'Just Now'}</div>
+                        <div style="font-size: 12px; color: #64748b;">${item.datecheckedout ? new Date(item.datecheckedout).toLocaleDateString() : 'Just Now'}</div>
                         <div>
                             <button class="btn-transfer" onclick="openTransferModal(${item.partid}, ${item.warehouseid}, '${item.name.replace(/'/g, "\\'")}')">📦 Transfer</button>
                             ${item.quantityonhand <= 5 ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">🔄 Restock</button>` : ''}
@@ -318,70 +345,101 @@
                     dataTarget.appendChild(row);
                 });
 
-                // Apply multi-column search rules if any are preset
-                filterGridRows();
+                // Dynamically re-populate column filter choices depending on current dataset limits
+                rebuildDynamicColumnDropdowns(items);
 
             } catch (err) {
                 console.error("Critical crash loading inventory components dashboard layout:", err);
             }
         }
 
-        // 2. Metadata Populator Function
-        async function populateDropdowns() {
-            try {
-                const response = await fetch('/api/inventory/filters');
-                if (!response.ok) return;
+        // CASCADING EFFECT: Looks at current grid items and updates dropdown elements
+        function rebuildDynamicColumnDropdowns(visibleItems) {
+            const skuDropdown = document.getElementById('col-filter-sku');
+            const nameDropdown = document.getElementById('col-filter-name');
+            const matDropdown = document.getElementById('col-filter-material');
 
-                const data = await response.json();
+            // Store prior selected settings
+            const currentSelectedSku = skuDropdown.value;
+            const currentSelectedName = nameDropdown.value;
+            const currentSelectedMat = matDropdown.value;
 
-                const skuDropdown = document.getElementById('col-filter-sku');
-                const nameDropdown = document.getElementById('col-filter-name');
-                const matDropdown = document.getElementById('col-filter-material');
-                const transferDestDropdown = document.getElementById('modal-new-warehouseid');
-                const mainWarehouseSelect = document.getElementById('warehouseFilter');
+            // Generate clean unique options maps
+            const uniqueSkus = new Set();
+            const uniqueNames = new Set();
+            const uniqueMaterials = new Set();
 
-                matDropdown.innerHTML = '<option value="">All Materials</option>';
+            visibleItems.forEach(item => {
+                if (item.sku) uniqueSkus.add(item.sku);
+                if (item.name) uniqueNames.add(item.name);
+                if (item.material) uniqueMaterials.add(item.material);
+            });
 
-                data.skus.forEach(sku => {
-                    const opt = document.createElement('option');
-                    opt.value = sku.toLowerCase();
-                    opt.textContent = sku;
-                    skuDropdown.appendChild(opt);
-                });
+            // Rebuild SKU list
+            skuDropdown.innerHTML = '<option value="">All SKUs</option>';
+            Array.from(uniqueSkus).sort().forEach(sku => {
+                const opt = document.createElement('option');
+                opt.value = sku.toLowerCase();
+                opt.textContent = sku;
+                if (sku.toLowerCase() === currentSelectedSku) opt.selected = true;
+                skuDropdown.appendChild(opt);
+            });
 
-                data.names.forEach(name => {
-                    const opt = document.createElement('option');
-                    opt.value = name.toLowerCase();
-                    opt.textContent = name;
-                    nameDropdown.appendChild(opt);
-                });
+            // Rebuild Name list
+            nameDropdown.innerHTML = '<option value="">All Product Names</option>';
+            Array.from(uniqueNames).sort().forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name.toLowerCase();
+                opt.textContent = name;
+                if (name.toLowerCase() === currentSelectedName) opt.selected = true;
+                nameDropdown.appendChild(opt);
+            });
 
-                data.materials.forEach(mat => {
-                    const opt = document.createElement('option');
-                    opt.value = mat.toLowerCase();
-                    opt.textContent = mat;
-                    matDropdown.appendChild(opt);
-                });
+            // Rebuild Material list
+            matDropdown.innerHTML = '<option value="">All Materials</option>';
+            Array.from(uniqueMaterials).sort().forEach(mat => {
+                const opt = document.createElement('option');
+                opt.value = mat.toLowerCase();
+                opt.textContent = mat;
+                if (mat.toLowerCase() === currentSelectedMat) opt.selected = true;
+                matDropdown.appendChild(opt);
+            });
+        }
 
-                if (transferDestDropdown && mainWarehouseSelect) {
-                    transferDestDropdown.innerHTML = '<option value="">-- Select Destination --</option>';
-                    mainWarehouseSelect.innerHTML = '<option value="all">🌐 Show All Facilities</option>';
+        function filterGridRows() {
+            const skuVal = document.getElementById('col-filter-sku').value.toLowerCase();
+            const nameVal = document.getElementById('col-filter-name').value.toLowerCase();
+            const matVal = document.getElementById('col-filter-material').value.toLowerCase();
+            const statusVal = document.getElementById('col-filter-status').value;
+
+            const rows = document.querySelectorAll('#inventory-data-target .inventory-grid-row');
+            const cascadingMatches = [];
+
+            rows.forEach(row => {
+                const rowSku = (row.getAttribute('data-sku') || '').toLowerCase();
+                const rowName = (row.getAttribute('data-name') || '').toLowerCase();
+                const rowMaterial = (row.getAttribute('data-material') || '').toLowerCase();
+                const rowStatus = row.getAttribute('data-status') || '';
+
+                const matchesSku = !skuVal || rowSku === skuVal;
+                const matchesName = !nameVal || rowName === nameVal;
+                const matchesMaterial = !matVal || rowMaterial === matVal;
+                const matchesStatus = !statusVal || rowStatus === statusVal;
+
+                if (matchesSku && matchesName && matchesMaterial && matchesStatus) {
+                    row.style.display = "grid";
                     
-                    data.warehouses.forEach(wh => {
-                        const mainOpt = document.createElement('option');
-                        mainOpt.value = wh.warehouseid;
-                        mainOpt.textContent = `📍 ${wh.facility_name} (${wh.warehouseid})`;
-                        mainWarehouseSelect.appendChild(mainOpt);
-
-                        const modalOpt = document.createElement('option');
-                        modalOpt.value = wh.warehouseid;
-                        modalOpt.textContent = `${wh.facility_name} (${wh.warehouseid})`;
-                        transferDestDropdown.appendChild(modalOpt);
-                    });
+                    // Track items that match criteria to maintain accurate sub-dropdown items
+                    const matchingItemObj = originalFetchedDataset.find(i => (i.sku || '').toLowerCase() === rowSku);
+                    if (matchingItemObj) cascadingMatches.push(matchingItemObj);
+                } else {
+                    row.style.display = "none";
                 }
+            });
 
-            } catch (err) {
-                console.error("Could not complete automatic dropdown mapping layout configuration:", err);
+            // If a filter is clear, reset dropdown options against parent dataset parameters
+            if (!skuVal && !nameVal && !matVal && !statusVal) {
+                rebuildDynamicColumnDropdowns(originalFetchedDataset);
             }
         }
 
@@ -460,33 +518,6 @@
             });
         }
 
-        function filterGridRows() {
-            const skuVal = document.getElementById('col-filter-sku').value.toLowerCase();
-            const nameVal = document.getElementById('col-filter-name').value.toLowerCase();
-            const matVal = document.getElementById('col-filter-material').value.toLowerCase();
-            const statusVal = document.getElementById('col-filter-status').value;
-
-            const rows = document.querySelectorAll('#inventory-data-target .inventory-grid-row');
-            
-            rows.forEach(row => {
-                const rowSku = (row.getAttribute('data-sku') || '').toLowerCase();
-                const rowName = (row.getAttribute('data-name') || '').toLowerCase();
-                const rowMaterial = (row.getAttribute('data-material') || '').toLowerCase();
-                const rowStatus = row.getAttribute('data-status') || '';
-
-                const matchesSku = !skuVal || rowSku === skuVal;
-                const matchesName = !nameVal || rowName === nameVal;
-                const matchesMaterial = !matVal || rowMaterial === matVal;
-                const matchesStatus = !statusVal || rowStatus === statusVal;
-
-                if (matchesSku && matchesName && matchesMaterial && matchesStatus) {
-                    row.style.display = "grid";
-                } else {
-                    row.style.display = "none";
-                }
-            });
-        }
-
         function openTransferModal(partId, warehouseId, partName) {
             document.getElementById('modal-part-name').innerText = partName;
             document.getElementById('modal-old-partid').value = partId;
@@ -533,6 +564,53 @@
                 }
             } catch (err) {
                 console.error(err);
+            }
+        }
+
+        async function submitNewFacility() {
+            const idInput = document.getElementById('newFacilityId').value;
+            const nameInput = document.getElementById('newFacilityName').value;
+            const feedback = document.getElementById('facilityFeedbackMessage');
+
+            if (!nameInput.trim()) {
+                feedback.style.color = '#ef4444';
+                feedback.innerText = "Please provide a valid facility name description.";
+                return;
+            }
+
+            const payload = {
+                facilityName: nameInput,
+                warehouseId: idInput ? parseInt(idInput) : null
+            };
+
+            try {
+                const response = await fetch('/api/inventory/facilities', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    feedback.style.color = '#10b981';
+                    feedback.innerText = `Success: Registered ${data.facility.facility_name} (ID: ${data.facility.warehouseid})`;
+                    
+                    // Reset input values cleanly
+                    document.getElementById('newFacilityId').value = '';
+                    document.getElementById('newFacilityName').value = '';
+
+                    // CRITICAL STEP: Re-fetch filter metadata options so dropdowns refresh without page reload!
+                    if (typeof fetchFilters === 'function') { fetchFilters(); }
+                    if (typeof loadDashboard === 'function') { loadDashboard(); }
+                } else {
+                    feedback.style.color = '#ef4444';
+                    feedback.innerText = `Error: ${data.error}`;
+                }
+            } catch (err) {
+                console.error("Network communication crash during facility addition:", err);
+                feedback.style.color = '#ef4444';
+                feedback.innerText = "Could not contact backend microservices engine.";
             }
         }
 
