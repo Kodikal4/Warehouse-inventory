@@ -295,6 +295,60 @@ app.post('/api/inventory/facilities', async (req, res) => {
     }
 });
 
+app.post('/api/inventory/transfer', async (req, res) => {
+    const { partid, fromWarehouseId, toWarehouseId, quantity } = req.body;
+    
+    // Ensure we parse the quantity correctly
+    const transferQty = parseInt(quantity);
+    if (!transferQty || transferQty <= 0) {
+        return res.status(400).json({ success: false, error: "Invalid transfer quantity requested." });
+    }
+
+    try {
+        // Start isolation transaction block
+        await db.query('BEGIN');
+
+        // 1. Check current stock level at the source node and subtract the amount
+        const subtractQuery = `
+            UPDATE public.inventorybalancestable
+            SET quantityonhand = quantityonhand - $1,
+                datecheckedout = CURRENT_TIMESTAMP
+            WHERE partid = $2 AND warehouseid = $3
+            RETURNING quantityonhand;
+        `;
+        const originCheck = await db.query(subtractQuery, [transferQty, partid, parseInt(fromWarehouseId)]);
+
+        // Safety Guard: Stop the transfer if there isn't enough stock
+        if (originCheck.rows.length === 0) {
+            throw new Error("No asset records found at the origin facility.");
+        }
+        if (originCheck.rows[0].quantityonhand < 0) {
+            throw new Error(`Insufficient stock available. Attempted to move ${transferQty} items, but origin stock is depleted.`);
+        }
+
+        // 2. Credit the destination facility. If it's a brand new city node, insert it!
+        const upsertQuery = `
+            INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand, datecheckedout)
+            VALUES ($1, $2, 'ZONE-X', $3, CURRENT_TIMESTAMP)
+            ON CONFLICT (partid, warehouseid) 
+            DO UPDATE SET 
+                quantityonhand = public.inventorybalancestable.quantityonhand + EXCLUDED.quantityonhand,
+                datecheckedout = CURRENT_TIMESTAMP;
+        `;
+        await db.query(upsertQuery, [partid, parseInt(toWarehouseId), transferQty]);
+
+        // Commit execution cleanly
+        await db.query('COMMIT');
+        res.json({ success: true, message: `Successfully repositioned logistics node batch.` });
+
+    } catch (err) {
+        // If anything fails during the process, undo all changes instantly so counts don't drift
+        await db.query('ROLLBACK');
+        console.error("Transfer error:", err.message);
+        res.status(400).json({ success: false, error: err.message });
+    }
+});
+
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
     console.log(`Inventory Engine active on port ${PORT}`);
