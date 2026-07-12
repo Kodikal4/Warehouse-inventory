@@ -296,17 +296,27 @@ app.post('/api/inventory/facilities', async (req, res) => {
 });
 
 app.post('/api/inventory/transfer', async (req, res) => {
-    const { partid, fromWarehouseId, toWarehouseId, quantity } = req.body;
+    // UPDATED: Now perfectly matches the payload fields sent by your frontend JavaScript
+    const { partId, sourceWarehouseId, targetWarehouseId, quantity } = req.body;
     
-    // Ensure we parse the quantity correctly
+    // Ensure we parse numeric parameters cleanly
     const transferQty = parseInt(quantity);
-    if (!transferQty || transferQty <= 0) {
+    const parsedPartId = parseInt(partId);
+    const parsedFromId = parseInt(sourceWarehouseId);
+    const parsedToId = parseInt(targetWarehouseId);
+
+    if (isNaN(transferQty) || transferQty <= 0) {
         return res.status(400).json({ success: false, error: "Invalid transfer quantity requested." });
     }
+    if (isNaN(parsedPartId) || isNaN(parsedFromId) || isNaN(parsedToId)) {
+        return res.status(400).json({ success: false, error: "Missing or malformed node identifier configurations." });
+    }
+
+    const client = await db.connect(); // Use a dedicated client for transaction isolation blocks
 
     try {
         // Start isolation transaction block
-        await db.query('BEGIN');
+        await client.query('BEGIN');
 
         // 1. Check current stock level at the source node and subtract the amount
         const subtractQuery = `
@@ -316,17 +326,19 @@ app.post('/api/inventory/transfer', async (req, res) => {
             WHERE partid = $2 AND warehouseid = $3
             RETURNING quantityonhand;
         `;
-        const originCheck = await db.query(subtractQuery, [transferQty, partid, parseInt(fromWarehouseId)]);
+        const originCheck = await client.query(subtractQuery, [transferQty, parsedPartId, parsedFromId]);
 
-        // Safety Guard: Stop the transfer if there isn't enough stock
+        // Safety Guard: Stop the transfer if there isn't an inventory relationship yet
         if (originCheck.rows.length === 0) {
             throw new Error("No asset records found at the origin facility.");
         }
+        
+        // Database level rule check against sending numbers below zero
         if (originCheck.rows[0].quantityonhand < 0) {
             throw new Error(`Insufficient stock available. Attempted to move ${transferQty} items, but origin stock is depleted.`);
         }
 
-        // 2. Credit the destination facility. If it's a brand new city node, insert it!
+        // 2. Credit the destination facility via Upsert.
         const upsertQuery = `
             INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand, datecheckedout)
             VALUES ($1, $2, 'ZONE-X', $3, CURRENT_TIMESTAMP)
@@ -335,17 +347,19 @@ app.post('/api/inventory/transfer', async (req, res) => {
                 quantityonhand = public.inventorybalancestable.quantityonhand + EXCLUDED.quantityonhand,
                 datecheckedout = CURRENT_TIMESTAMP;
         `;
-        await db.query(upsertQuery, [partid, parseInt(toWarehouseId), transferQty]);
+        await client.query(upsertQuery, [parsedPartId, parsedToId, transferQty]);
 
         // Commit execution cleanly
-        await db.query('COMMIT');
+        await client.query('COMMIT');
         res.json({ success: true, message: `Successfully repositioned logistics node batch.` });
 
     } catch (err) {
-        // If anything fails during the process, undo all changes instantly so counts don't drift
-        await db.query('ROLLBACK');
-        console.error("Transfer error:", err.message);
+        // Rollback instantly so counts don't drift mid-flight
+        await client.query('ROLLBACK');
+        console.error("Transfer execution aborted:", err.message);
         res.status(400).json({ success: false, error: err.message });
+    } finally {
+        client.release(); // Free up the pool thread client instance
     }
 });
 
