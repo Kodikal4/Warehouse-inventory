@@ -24,16 +24,26 @@ app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 1. GET Aggregate Inventory Summary for Analytics Pulse
 app.get('/api/inventory/summary', async (_req, res) => {
     try {
         const summaryQuery = `
             SELECT 
+                -- 1. True financial footprint calculated strictly from physical balances > 0
                 COALESCE(SUM(i.quantityonhand * p.retailprice), 0) AS total_value,
-                COUNT(DISTINCT i.warehouseid) AS active_warehouses,
-                COUNT(CASE WHEN i.quantityonhand <= p.minimumstocklevel THEN 1 END) AS stockout_risks
-            FROM public.partstable p
-            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid;
+                
+                -- 2. Clean count of facilities tracking active, non-zero stock
+                COUNT(DISTINCT CASE WHEN i.quantityonhand > 0 THEN i.warehouseid END) AS active_warehouses,
+                
+                -- 3. Isolated subquery to track actual stockout risks
+                (
+                    SELECT COUNT(*) 
+                    FROM public.inventorybalancestable inv
+                    INNER JOIN public.partstable parts ON inv.partid = parts.partid
+                    WHERE inv.quantityonhand <= parts.minimumstocklevel
+                ) AS stockout_risks
+            FROM public.inventorybalancestable i
+            INNER JOIN public.partstable p ON i.partid = p.partid
+            WHERE i.quantityonhand > 0; -- Filters out depleted placeholder rows globally
         `;
         const result = await db.query(summaryQuery);
         res.json(result.rows[0]);
