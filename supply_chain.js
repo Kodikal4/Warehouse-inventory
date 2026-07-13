@@ -24,27 +24,28 @@ app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// 1. GET Executive Summary Dashboard Cards
 app.get('/api/inventory/summary', async (_req, res) => {
     try {
+        // FIXED: Swapped to LEFT JOIN and removed hardcoded WHERE clause so total calculations remain consistent
         const summaryQuery = `
             SELECT 
-                -- 1. Financial footprint from physical balances
+                -- 1. Financial footprint calculated across all linked inventory structures
                 COALESCE(SUM(i.quantityonhand * p.retailprice), 0) AS total_value,
                 
                 -- 2. Clean count of facilities tracking active stock
                 COUNT(DISTINCT CASE WHEN i.quantityonhand > 0 THEN i.warehouseid END) AS active_warehouses,
                 
-                -- 3. FIXED: Only count stockout risks for items actually on hand (> 0)
-                (
+                -- 3. Filtered count for stockout risks (items below minimum stock threshold but above zero)
+                COALESCE((
                     SELECT COUNT(*) 
                     FROM public.inventorybalancestable inv
                     INNER JOIN public.partstable parts ON inv.partid = parts.partid
                     WHERE inv.quantityonhand <= parts.minimumstocklevel 
                       AND inv.quantityonhand > 0
-                ) AS stockout_risks
-            FROM public.inventorybalancestable i
-            INNER JOIN public.partstable p ON i.partid = p.partid
-            WHERE i.quantityonhand > 0;
+                ), 0) AS stockout_risks
+            FROM public.partstable p
+            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid;
         `;
         const result = await db.query(summaryQuery);
         res.json(result.rows[0]);
@@ -54,24 +55,22 @@ app.get('/api/inventory/summary', async (_req, res) => {
     }
 });
 
-// 2. GET Live Stock Catalog Entries - FIXED ROUTE AND PARAMETERS
+// 2. GET Live Stock Catalog Entries
 app.get('/api/inventory', async (req, res) => {
     try {
-        // The frontend drop-down filters send "warehouseId", not "warehouse"
         const { warehouseId } = req.query; 
         
         let queryText = `
             SELECT 
                 p.sku, p.name, p.material_name AS material, p.retailprice,
-                i.warehouseid, i.quantityonhand, i.datecheckedout, p.minimumstocklevel, p.partid,
+                i.warehouseid, COALESCE(i.quantityonhand, 0) AS quantityonhand, i.datecheckedout, p.minimumstocklevel, p.partid,
                 w.facility_name AS node_loc
             FROM public.partstable p
-            INNER JOIN public.inventorybalancestable i ON p.partid = i.partid
+            LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
             LEFT JOIN public.warehousestable w ON i.warehouseid = w.warehouseid
         `;
 
         const queryParams = [];
-        // Support both "all" and undefined/empty states safely
         if (warehouseId && warehouseId !== 'all' && warehouseId !== '') {
             queryText += ` WHERE i.warehouseid = $1`;
             queryParams.push(parseInt(warehouseId));
@@ -151,7 +150,6 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Capture current operational inventory depth to migrate across locations safely
         const balanceCheck = await client.query(`
             SELECT quantityonhand FROM public.inventorybalancestable 
             WHERE partid = $1 AND warehouseid = $2;
@@ -164,7 +162,6 @@ app.put('/api/inventory/update-keys', async (req, res) => {
 
         const currentStockVolume = balanceCheck.rows[0].quantityonhand;
 
-        // Clear source entry records to prevent duplicate tracking anomalies
         await client.query(`
             DELETE FROM public.inventorybalancestable 
             WHERE partid = $1 AND warehouseid = $2;
@@ -208,12 +205,11 @@ app.put('/api/inventory/update-keys', async (req, res) => {
     }
 });
 
-// 5. GET: Extract Distinct Options Dynamic Mapper (UPDATED FOR CASCADING FILTERS)
+// 5. GET: Extract Distinct Options Dynamic Mapper
 app.get('/api/inventory/filters', async (req, res) => {
     try {
         const { sku, name, material } = req.query;
 
-        // Base structural array for parameters
         const clauses = [];
         const params = [];
 
@@ -232,7 +228,6 @@ app.get('/api/inventory/filters', async (req, res) => {
 
         const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
 
-        // Dynamic Query generation relying on active relationships
         const skusQuery = `SELECT DISTINCT sku FROM public.partstable ${whereClause ? whereClause + ' AND' : 'WHERE'} sku IS NOT NULL AND sku != '' ORDER BY sku ASC;`;
         const namesQuery = `SELECT DISTINCT name FROM public.partstable ${whereClause ? whereClause + ' AND' : 'WHERE'} name IS NOT NULL AND name != '' ORDER BY name ASC;`;
         const materialsQuery = `SELECT DISTINCT material_name FROM public.partstable ${whereClause ? whereClause + ' AND' : 'WHERE'} material_name IS NOT NULL AND material_name != '' ORDER BY material_name ASC;`;
@@ -266,8 +261,6 @@ app.post('/api/inventory/facilities', async (req, res) => {
     }
 
     try {
-        // If your warehouseid is a SERIAL auto-incrementing key, omit it from the insert statement.
-        // If it's a manual input code (like 101, 202), we include it explicitly.
         let insertQuery;
         let queryParams;
 
@@ -306,11 +299,10 @@ app.post('/api/inventory/facilities', async (req, res) => {
     }
 });
 
+// 7. POST: Move stock items between warehouses
 app.post('/api/inventory/transfer', async (req, res) => {
-    // UPDATED: Now perfectly matches the payload fields sent by your frontend JavaScript
     const { partId, sourceWarehouseId, targetWarehouseId, quantity } = req.body;
     
-    // Ensure we parse numeric parameters cleanly
     const transferQty = parseInt(quantity);
     const parsedPartId = parseInt(partId);
     const parsedFromId = parseInt(sourceWarehouseId);
@@ -323,13 +315,11 @@ app.post('/api/inventory/transfer', async (req, res) => {
         return res.status(400).json({ success: false, error: "Missing or malformed node identifier configurations." });
     }
 
-    const client = await db.connect(); // Use a dedicated client for transaction isolation blocks
+    const client = await db.connect();
 
     try {
-        // Start isolation transaction block
         await client.query('BEGIN');
 
-        // 1. Check current stock level at the source node and subtract the amount
         const subtractQuery = `
             UPDATE public.inventorybalancestable
             SET quantityonhand = quantityonhand - $1,
@@ -339,17 +329,14 @@ app.post('/api/inventory/transfer', async (req, res) => {
         `;
         const originCheck = await client.query(subtractQuery, [transferQty, parsedPartId, parsedFromId]);
 
-        // Safety Guard: Stop the transfer if there isn't an inventory relationship yet
         if (originCheck.rows.length === 0) {
             throw new Error("No asset records found at the origin facility.");
         }
         
-        // Database level rule check against sending numbers below zero
         if (originCheck.rows[0].quantityonhand < 0) {
             throw new Error(`Insufficient stock available. Attempted to move ${transferQty} items, but origin stock is depleted.`);
         }
 
-        // 2. Credit the destination facility via Upsert.
         const upsertQuery = `
             INSERT INTO public.inventorybalancestable (partid, warehouseid, binlocation, quantityonhand, datecheckedout)
             VALUES ($1, $2, 'ZONE-X', $3, CURRENT_TIMESTAMP)
@@ -360,17 +347,15 @@ app.post('/api/inventory/transfer', async (req, res) => {
         `;
         await client.query(upsertQuery, [parsedPartId, parsedToId, transferQty]);
 
-        // Commit execution cleanly
         await client.query('COMMIT');
         res.json({ success: true, message: `Successfully repositioned logistics node batch.` });
 
     } catch (err) {
-        // Rollback instantly so counts don't drift mid-flight
         await client.query('ROLLBACK');
         console.error("Transfer execution aborted:", err.message);
         res.status(400).json({ success: false, error: err.message });
     } finally {
-        client.release(); // Free up the pool thread client instance
+        client.release();
     }
 });
 
