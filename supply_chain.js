@@ -28,22 +28,23 @@ app.get('/api/inventory/summary', async (_req, res) => {
     try {
         const summaryQuery = `
             SELECT 
-                -- 1. True financial footprint calculated strictly from physical balances > 0
+                -- 1. Financial footprint from physical balances
                 COALESCE(SUM(i.quantityonhand * p.retailprice), 0) AS total_value,
                 
-                -- 2. Clean count of facilities tracking active, non-zero stock
+                -- 2. Clean count of facilities tracking active stock
                 COUNT(DISTINCT CASE WHEN i.quantityonhand > 0 THEN i.warehouseid END) AS active_warehouses,
                 
-                -- 3. Isolated subquery to track actual stockout risks
+                -- 3. FIXED: Only count stockout risks for items actually on hand (> 0)
                 (
                     SELECT COUNT(*) 
                     FROM public.inventorybalancestable inv
                     INNER JOIN public.partstable parts ON inv.partid = parts.partid
-                    WHERE inv.quantityonhand <= parts.minimumstocklevel
+                    WHERE inv.quantityonhand <= parts.minimumstocklevel 
+                      AND inv.quantityonhand > 0
                 ) AS stockout_risks
             FROM public.inventorybalancestable i
             INNER JOIN public.partstable p ON i.partid = p.partid
-            WHERE i.quantityonhand > 0; -- Filters out depleted placeholder rows globally
+            WHERE i.quantityonhand > 0;
         `;
         const result = await db.query(summaryQuery);
         res.json(result.rows[0]);
