@@ -273,6 +273,7 @@
             }
         }
 
+        
         async function loadDashboard() {
             try {
                 const facilityFilter = document.getElementById('warehouseFilter').value;
@@ -291,65 +292,107 @@
                 let lowStockCount = 0;
                 const activeFacilitiesSet = new Set();
 
+                // 1. Loop through items to calculate dashboard metrics
                 items.forEach(item => {
-                    totalValue += (item.quantityonhand * (item.retailprice || 0));
-                    activeFacilitiesSet.add(item.warehouseid);
-                    if (item.quantityonhand <= 5) {
+                    const qty = Number(item.quantityonhand) || 0;
+                    const price = Number(item.retailprice) || 0;
+                    const minStock = Number(item.minimumstocklevel) || 0;
+
+                    // Calculate Total Value (Only once per valid stock item)
+                    if (qty > 0) {
+                        totalValue += (qty * price);
+                    }
+                    
+                    // Track Unique Active Facilities holding stock
+                    if (item.warehouseid && qty > 0) {
+                        activeFacilitiesSet.add(item.warehouseid);
+                    }
+
+                    // Low Stock / Stockout Risk Metrics
+                    if (qty > 0 && qty <= minStock) {
                         lowStockCount++;
                     }
-                });
+                }); // <-- FIXED: Safely closed the calculation loop here
 
-                document.getElementById('meta-value').innerText = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalValue);
-                document.getElementById('meta-nodes').innerText = activeFacilitiesSet.size;
-                document.getElementById('meta-risks').innerText = lowStockCount;
+                // 2. Format the calculated total value as USD currency
+                const formattedValue = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD'
+                }).format(totalValue);
 
+                // 3. Update primary KPI cards in UI
+                if (document.getElementById('total-value-card')) {
+                    document.getElementById('total-value-card').innerText = formattedValue;
+                }
+                if (document.getElementById('active-warehouses-card')) {
+                    document.getElementById('active-warehouses-card').innerText = activeFacilitiesSet.size;
+                }
+                if (document.getElementById('stockout-card')) {
+                    document.getElementById('stockout-card').innerText = lowStockCount;
+                }
+
+                // Update meta KPI elements
+                if (document.getElementById('meta-value')) {
+                    document.getElementById('meta-value').innerText = formattedValue;
+                }
+                if (document.getElementById('meta-nodes')) {
+                    document.getElementById('meta-nodes').innerText = activeFacilitiesSet.size;
+                }
+                if (document.getElementById('meta-risks')) {
+                    document.getElementById('meta-risks').innerText = lowStockCount;
+                }
+
+                // Render charts and ranks
                 renderTopAndBottomRanks(items);
                 renderInventoryDonutChart(items);
 
+                // 4. Render Grid Table Rows
                 const dataTarget = document.getElementById('inventory-data-target');
-                dataTarget.innerHTML = '';
+                if (dataTarget) {
+                    dataTarget.innerHTML = '';
 
-                items.forEach(item => {
-                    const statusBadge = item.quantityonhand <= 5 ? 'CRITICAL' : 'STABLE';
-                    const badgeClass = item.quantityonhand <= 5 ? 'badge-danger' : 'badge-ok';
-                    const displayLocation = facilityNames[item.warehouseid] || `Facility (${item.warehouseid})`;
-                    
-                    const row = document.createElement('div');
-                    row.className = 'inventory-grid-row';
-                    
-                    row.setAttribute('data-sku', item.sku || '');
-                    row.setAttribute('data-name', item.name || '');
-                    row.setAttribute('data-material', item.material || '');
-                    row.setAttribute('data-status', statusBadge);
+                    items.forEach(item => {
+                        const statusBadge = item.quantityonhand <= 5 ? 'CRITICAL' : 'STABLE';
+                        const badgeClass = item.quantityonhand <= 5 ? 'badge-danger' : 'badge-ok';
+                        const displayLocation = facilityNames[item.warehouseid] || `Facility (${item.warehouseid})`;
+                        
+                        const row = document.createElement('div');
+                        row.className = 'inventory-grid-row';
+                        
+                        row.setAttribute('data-sku', item.sku || '');
+                        row.setAttribute('data-name', item.name || '');
+                        row.setAttribute('data-material', item.material || '');
+                        row.setAttribute('data-status', statusBadge);
 
-                    const fillPercent = Math.min((item.quantityonhand / 50) * 100, 100);
-                    const fillBarColor = item.quantityonhand <= 5 ? '#ef4444' : '#3b82f6';
+                        const fillPercent = Math.min((item.quantityonhand / 50) * 100, 100);
+                        const fillBarColor = item.quantityonhand <= 5 ? '#ef4444' : '#3b82f6';
 
-                    row.innerHTML = `
-                        <div style="font-weight: bold; color: #cbd5e1;">${item.sku}</div>
-                        <div>
-                            ${item.name} 
-                            <br/><span class="badge ${badgeClass}" style="margin-top: 4px;">${statusBadge} LEVEL</span>
-                        </div>
-                        <div style="color: #fbbf24; font-weight: 500;">${item.material || 'N/A'}</div>
-                        <div style="color: #34d399; font-weight: bold;">$${parseFloat(item.retailprice).toFixed(2)}</div>
-                        <div style="font-size: 13px; color: #94a3b8;">${displayLocation}</div>
-                        <div>
-                            <span style="font-weight: bold;">${item.quantityonhand} units</span>
-                            <div class="load-bar-container">
-                                <div class="load-bar-fill" style="width: ${fillPercent}%; background-color: ${fillBarColor};"></div>
+                        row.innerHTML = `
+                            <div style="font-weight: bold; color: #cbd5e1;">${item.sku}</div>
+                            <div>
+                                ${item.name} 
+                                <br/><span class="badge ${badgeClass}" style="margin-top: 4px;">${statusBadge} LEVEL</span>
                             </div>
-                        </div>
-                        <div style="font-size: 12px; color: #64748b;">${item.datecheckedout ? new Date(item.datecheckedout).toLocaleDateString() : 'Just Now'}</div>
-                        <div>
-                            <button class="btn-transfer" onclick="openTransferModal(${item.partid}, ${item.warehouseid}, '${item.name.replace(/'/g, "\\'")}', ${item.retailprice})">📦 Transfer</button>
-                            ${item.quantityonhand <= 5 ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">🔄 Restock</button>` : ''}
-                        </div>
-                    `;
-                    dataTarget.appendChild(row);
-                });
+                            <div style="color: #fbbf24; font-weight: 500;">${item.material || 'N/A'}</div>
+                            <div style="color: #34d399; font-weight: bold;">$${parseFloat(item.retailprice).toFixed(2)}</div>
+                            <div style="font-size: 13px; color: #94a3b8;">${displayLocation}</div>
+                            <div>
+                                <span style="font-weight: bold;">${item.quantityonhand} units</span>
+                                <div class="load-bar-container">
+                                    <div class="load-bar-fill" style="width: ${fillPercent}%; background-color: ${fillBarColor};"></div>
+                                </div>
+                            </div>
+                            <div style="font-size: 12px; color: #64748b;">${item.datecheckedout ? new Date(item.datecheckedout).toLocaleDateString() : 'Just Now'}</div>
+                            <div>
+                                <button class="btn-transfer" onclick="openTransferModal(${item.partid}, ${item.warehouseid}, '${item.name.replace(/'/g, "\\'")}', ${item.retailprice})">📦 Transfer</button>
+                                ${item.quantityonhand <= 5 ? `<button class="btn-reorder" onclick="dispatchRestockOrder('${item.sku}', ${item.partid}, ${item.warehouseid})">🔄 Restock</button>` : ''}
+                            </div>
+                        `;
+                        dataTarget.appendChild(row);
+                    });
+                }
 
-                // Dynamically re-populate column filter choices depending on current dataset limits
+                // Dynamically re-populate dropdown filters
                 rebuildDynamicColumnDropdowns(items);
 
             } catch (err) {
