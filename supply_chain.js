@@ -62,8 +62,15 @@ app.get('/api/inventory', async (req, res) => {
         
         let queryText = `
             SELECT 
-                p.sku, p.name, p.material_name AS material, p.retailprice,
-                i.warehouseid, COALESCE(i.quantityonhand, 0) AS quantityonhand, i.datecheckedout, p.minimumstocklevel, p.partid,
+                p.sku, 
+                p.name, 
+                p.material_name AS material, 
+                p.retailprice,
+                i.warehouseid, 
+                COALESCE(i.quantityonhand, 0) AS quantityonhand, 
+                i.datecheckedout, 
+                p.minimumstocklevel, 
+                p.partid,
                 w.facility_name AS node_loc
             FROM public.partstable p
             LEFT JOIN public.inventorybalancestable i ON p.partid = i.partid
@@ -71,9 +78,15 @@ app.get('/api/inventory', async (req, res) => {
         `;
 
         const queryParams = [];
+        
         if (warehouseId && warehouseId !== 'all' && warehouseId !== '') {
-            queryText += ` WHERE i.warehouseid = $1`;
+            // FILTER 1: If a specific warehouse is selected, filter by that ID AND ensure there is physical stock
+            queryText += ` WHERE i.warehouseid = $1 AND COALESCE(i.quantityonhand, 0) > 0`;
             queryParams.push(parseInt(warehouseId));
+        } else {
+            // FILTER 2: If 'all' is selected, filter out any catalog entries that have 0 or null stock.
+            // This prevents adding empty retail price placeholders to your calculation arrays!
+            queryText += ` WHERE COALESCE(i.quantityonhand, 0) > 0`;
         }
 
         queryText += ` ORDER BY p.partid ASC`;
